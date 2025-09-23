@@ -18,34 +18,45 @@ expressApp.use(express.urlencoded({ extended: true }));
 // Handle WhatsApp messages
 expressApp.post('/whatsapp', async (req, res) => {
   const twiml = new twilio.twiml.MessagingResponse();
-  const msg = req.body.Body.toLowerCase();
+  const msg = req.body.Body.toLowerCase().trim(); // Added trim() to remove extra spaces
   const from = req.body.From;
 
+  // Debug log
+  console.log(`Received message: "${msg}" from ${from}`);
+
   try {
-    // Main menu
+    // Main menu - simplified condition
     if (msg === 'menu') {
-      twiml.message(`📋 *Welcome to Kwasu Lost And Found Bot!*\n_v0.1 Designed & Developed by_ Rugged of ICT.\n\nTo proceed with, Select what you are here for from the menu:\n\n1. *Report Lost Item*\n2. *Report Found Item*\n3. *Search for my lost Item*\n\nKindly Reply with 1, 2, or 3.`);
+      console.log('Processing menu command');
+      const menuMessage = `📋 *Welcome to Kwasu Lost And Found Bot!*\n_v0.1 Designed & Developed by_ Rugged of ICT.\n\nTo proceed with, Select what you are here for from the menu:\n\n1. *Report Lost Item*\n2. *Report Found Item*\n3. *Search for my lost Item*\n\nKindly Reply with 1, 2, or 3.`;
+      twiml.message(menuMessage);
+      console.log('Menu message sent');
     } 
     // Report lost
     else if (msg === '1') {
+      console.log('Processing report lost command');
       twiml.message('🔍 *Report Lost Item*\n\nPlease provide the following details:\nITEM, LOCATION, DESCRIPTION\n\nExample: "Water Bottle, Library, Blue with sticker"');
       await set(ref(db, `users/${from}`), { action: 'report_lost' });
     }
     // Report found
     else if (msg === '2') {
+      console.log('Processing report found command');
       twiml.message('🎁 *Report Found Item*\n\nPlease provide the following details:\nITEM, LOCATION, CONTACT_PHONE\n\nExample: "Keys, Cafeteria, 08012345678"');
       await set(ref(db, `users/${from}`), { action: 'report_found' });
     }
     // Search
     else if (msg === '3') {
+      console.log('Processing search command');
       twiml.message('🔎 *Search for my lost Item*\n\nPlease reply with a keyword to search:\n\nExample: "water", "keys", "bag"');
       await set(ref(db, `users/${from}`), { action: 'search' });
     }
     // Handle responses
     else {
+      console.log('Processing other command:', msg);
       await handleResponse(from, msg, twiml);
     }
 
+    console.log('Sending response');
     res.type('text/xml').send(twiml.toString());
   } catch (error) {
     console.error('Main handler error:', error);
@@ -56,14 +67,18 @@ expressApp.post('/whatsapp', async (req, res) => {
 
 async function handleResponse(from, msg, twiml) {
   try {
+    console.log(`Handling response for: ${msg}`);
     // Get user state
     const userSnapshot = await get(child(ref(db), `users/${from}`));
     const user = userSnapshot.val();
     
     if (!user) {
+      console.log('No user state found, sending invalid command');
       twiml.message('❓ Invalid command. Reply "menu" for options.');
       return;
     }
+
+    console.log('User state:', user);
 
     // Handle report submission
     if (user.action === 'report_lost' || user.action === 'report_found') {
