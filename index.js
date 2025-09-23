@@ -32,12 +32,12 @@ Reply with 1, 2, or 3.`);
     } 
     // Report lost
     else if (msg === '1') {
-      twiml.message('🔍 **Kwasu Lost And Found Bot**\nReply with: ITEM, LOCATION (e.g., "Water Bottle, Library")');
+      twiml.message('🔍 **Kwasu Lost And Found Bot**\nReply with: ITEM, LOCATION, DESCRIPTION (e.g., "Water Bottle, Library, Blue with sticker")');
       await set(ref(db, `users/${from}`), { action: 'report_lost' });
     }
     // Report found
     else if (msg === '2') {
-      twiml.message('🎁 **Kwasu Lost And Found Bot**\nReply with: ITEM, LOCATION (e.g., "Keys, Cafeteria")');
+      twiml.message('🎁 **Kwasu Lost And Found Bot**\nReply with: ITEM, LOCATION, CONTACT_PHONE (e.g., "Keys, Cafeteria, 08012345678")');
       await set(ref(db, `users/${from}`), { action: 'report_found' });
     }
     // Search
@@ -72,28 +72,53 @@ async function handleResponse(from, msg, twiml) {
     // Handle report submission
     if (user.action === 'report_lost' || user.action === 'report_found') {
       const parts = msg.split(',');
-      if (parts.length < 2) {
-        twiml.message('⚠️ Format error. Please use: ITEM, LOCATION');
+      if (parts.length < 3) {
+        twiml.message(`⚠️ Format error. Please use: ${user.action === 'report_lost' ? 'ITEM, LOCATION, DESCRIPTION' : 'ITEM, LOCATION, CONTACT_PHONE'}`);
         return;
       }
       
       const item = parts[0].trim();
       const location = parts[1].trim();
-      const description = parts.slice(2).join(',').trim() || 'No description';
+      const thirdPart = parts[2].trim();
       
-      // Save to Firebase
-      const newReportRef = push(ref(db, 'reports'));
-      await set(newReportRef, {
+      let reportData = {
         type: user.action.replace('report_', ''),
         item,
         location,
-        description,
         reporter: from,
         timestamp: new Date().toISOString()
-      });
+      };
+      
+      if (user.action === 'report_lost') {
+        reportData.description = parts.slice(2).join(',').trim();
+      } else {
+        reportData.contact_phone = thirdPart;
+        reportData.description = parts.slice(3).join(',').trim() || 'No description';
+      }
+      
+      // Save to Firebase
+      const newReportRef = push(ref(db, 'reports'));
+      await set(newReportRef, reportData);
 
       // Send confirmation
-      twiml.message(`✅ **Kwasu Lost And Found Bot**\n${user.action === 'report_lost' ? 'Lost' : 'Found'} item reported!\n\nItem: ${item}\nLocation: ${location}\nDescription: ${description}`);
+      let confirmationMsg = `✅ **Kwasu Lost And Found Bot**\n${user.action === 'report_lost' ? 'Lost' : 'Found'} item reported!\n\nItem: ${item}\nLocation: ${location}`;
+      
+      if (user.action === 'report_lost') {
+        confirmationMsg += `\nDescription: ${reportData.description}`;
+        
+        // Check for matching found items
+        const foundItems = await findMatchingFoundItems(item);
+        if (foundItems.length > 0) {
+          confirmationMsg += `\n\n🎉 Good news! We found ${foundItems.length} matching item(s) that were reported found:\n\n`;
+          foundItems.forEach((item, index) => {
+            confirmationMsg += `${index + 1}. ${item.item}\n   📍 Location: ${item.location}\n   📞 Contact: ${item.contact_phone}\n   📝 ${item.description}\n   ⏰ ${new Date(item.timestamp).toLocaleString()}\n\n`;
+          });
+        }
+      } else {
+        confirmationMsg += `\n📞 Contact: ${reportData.contact_phone}\nDescription: ${reportData.description}`;
+      }
+      
+      twiml.message(confirmationMsg);
       
       // Clear user state
       await remove(ref(db, `users/${from}`));
@@ -117,7 +142,11 @@ async function handleResponse(from, msg, twiml) {
         const searchText = `${report.item} ${report.location} ${report.description}`.toLowerCase();
         if (searchText.includes(msg.toLowerCase())) {
           found = true;
-          response += `📦 ${report.item}\n📍 ${report.location}\n📝 ${report.description}\n⏰ ${new Date(report.timestamp).toLocaleString()}\n\n`;
+          response += `📦 ${report.item}\n📍 ${report.location}\n📝 ${report.description}`;
+          if (report.type === 'found') {
+            response += `\n📞 Contact: ${report.contact_phone}`;
+          }
+          response += `\n⏰ ${new Date(report.timestamp).toLocaleString()}\n\n`;
         }
       });
       
@@ -131,6 +160,38 @@ async function handleResponse(from, msg, twiml) {
   } catch (error) {
     console.error('Handle response error:', error);
     twiml.message('❌ An error occurred. Please try again.');
+  }
+}
+
+// Helper function to find matching found items
+async function findMatchingFoundItems(searchItem) {
+  try {
+    const reportsSnapshot = await get(child(ref(db), 'reports'));
+    const reports = reportsSnapshot.val();
+    
+    if (!reports) return [];
+    
+    const searchKeywords = searchItem.toLowerCase().split(' ');
+    const matchingItems = [];
+    
+    Object.entries(reports).forEach(([key, report]) => {
+      if (report.type === 'found') {
+        const reportText = `${report.item} ${report.description}`.toLowerCase();
+        const matchScore = searchKeywords.reduce((score, keyword) => {
+          return score + (reportText.includes(keyword) ? 1 : 0);
+        }, 0);
+        
+        if (matchScore > 0) {
+          matchingItems.push({...report, matchScore});
+        }
+      }
+    });
+    
+    // Sort by match score (highest first)
+    return matchingItems.sort((a, b) => b.matchScore - a.matchScore);
+  } catch (error) {
+    console.error('Error finding matching items:', error);
+    return [];
   }
 }
 
