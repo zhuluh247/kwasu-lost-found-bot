@@ -53,60 +53,88 @@ Reply with 1, 2, or 3.`);
 });
 
 async function handleResponse(from, msg, twiml) {
-  const userSnapshot = await get(child(ref(db), `users/${from}`));
-  const user = userSnapshot.val();
-  
-  if (!user) {
-    twiml.message('❓ Invalid command. Reply "menu" for options.');
-    return;
-  }
-
-  // Save report
-  if (user.action.includes('report')) {
-    const [item, location] = msg.split(',').map(s => s.trim());
-    if (!item || !location) {
-      twiml.message('⚠️ Format error. Use: ITEM, LOCATION');
+  try {
+    // Get user state
+    const userSnapshot = await get(child(ref(db), `users/${from}`));
+    const user = userSnapshot.val();
+    
+    if (!user) {
+      twiml.message('❓ Invalid command. Reply "menu" for options.');
       return;
     }
 
-    const newReportRef = push(ref(db, 'reports'));
-    await set(newReportRef, {
-      type: user.action === 'report_lost' ? 'lost' : 'found',
-      item,
-      location,
-      reporter: from,
-      timestamp: new Date().toISOString()
-    });
-
-    twiml.message(`✅ **Kwasu Lost And Found Bot**\n${user.action === 'report_lost' ? 'Lost' : 'Found'} item reported!`);
-    remove(ref(db, `users/${from}`));
-  }
-  // Search
-  else if (user.action === 'search') {
-    const reportsSnapshot = await get(child(ref(db), 'reports'));
-    const reports = reportsSnapshot.val();
-    
-    if (!reports) {
-      twiml.message('❌ No items found.');
-      return;
-    }
-
-    let response = `🔍 **Kwasu Lost And Found Bot**\nFound items matching "${msg}":\n\n`;
-    let found = false;
-    
-    Object.entries(reports).forEach(([key, report]) => {
-      if (report.item.toLowerCase().includes(msg)) {
-        found = true;
-        response += `📦 ${report.item}\n📍 ${report.location}\n⏰ ${new Date(report.timestamp).toLocaleString()}\n\n`;
+    // Handle report submission
+    if (user.action === 'report_lost' || user.action === 'report_found') {
+      const parts = msg.split(',');
+      if (parts.length < 2) {
+        twiml.message('⚠️ Format error. Please use: ITEM, LOCATION');
+        return;
       }
-    });
-    
-    if (!found) {
-      response = `❌ No items found matching "${msg}".`;
+      
+      const item = parts[0].trim();
+      const location = parts[1].trim();
+      const description = parts.slice(2).join(',').trim() || 'No description';
+      
+      try {
+        // Save to Firebase
+        const newReportRef = push(ref(db, 'reports'));
+        await set(newReportRef, {
+          type: user.action.replace('report_', ''),
+          item,
+          location,
+          description,
+          reporter: from,
+          timestamp: new Date().toISOString()
+        });
+
+        // Send confirmation
+        twiml.message(`✅ **Kwasu Lost And Found Bot**\n${user.action === 'report_lost' ? 'Lost' : 'Found'} item reported!\n\nItem: ${item}\nLocation: ${location}\nDescription: ${description}`);
+        
+        // Clear user state
+        remove(ref(db, `users/${from}`));
+      } catch (error) {
+        console.error('Firebase save error:', error);
+        twiml.message('❌ Error saving report. Please try again.');
+      }
     }
     
-    twiml.message(response);
-    remove(ref(db, `users/${from}`));
+    // Handle search
+    else if (user.action === 'search') {
+      try {
+        const reportsSnapshot = await get(child(ref(db), 'reports'));
+        const reports = reportsSnapshot.val();
+        
+        if (!reports || Object.keys(reports).length === 0) {
+          twiml.message('❌ No items found in the database.');
+          return;
+        }
+
+        let response = `🔍 **Kwasu Lost And Found Bot**\nFound items matching "${msg}":\n\n`;
+        let found = false;
+        
+        // Search in item names, locations, and descriptions
+        Object.entries(reports).forEach(([key, report]) => {
+          const searchText = `${report.item} ${report.location} ${report.description}`.toLowerCase();
+          if (searchText.includes(msg.toLowerCase())) {
+            found = true;
+            response += `📦 ${report.item}\n📍 ${report.location}\n📝 ${report.description}\n⏰ ${new Date(report.timestamp).toLocaleString()}\n\n`;
+          }
+        });
+        
+        if (!found) {
+          response = `❌ No items found matching "${msg}".\n\nTry searching with different keywords or check the spelling.`;
+        }
+        
+        twiml.message(response);
+        remove(ref(db, `users/${from}`));
+      } catch (error) {
+        console.error('Firebase search error:', error);
+        twiml.message('❌ Error searching items. Please try again.');
+      }
+    }
+  } catch (error) {
+    console.error('Handle response error:', error);
+    twiml.message('❌ An error occurred. Please try again.');
   }
 }
 
