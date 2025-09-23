@@ -1,22 +1,22 @@
 const express = require('express');
 const twilio = require('twilio');
-const firebase = require('firebase/app');
-require('firebase/database');
+const { initializeApp } = require('firebase/app');
+const { getDatabase, ref, push, set, get, child, remove } = require('firebase/database');
 require('dotenv').config();
 
 // Initialize Firebase
 const firebaseConfig = {
   databaseURL: process.env.FIREBASE_DATABASE_URL
 };
-firebase.initializeApp(firebaseConfig);
-const db = firebase.database();
+const app = initializeApp(firebaseConfig);
+const db = getDatabase(app);
 
 // Initialize Express
-const app = express();
-app.use(express.urlencoded({ extended: true }));
+const expressApp = express();
+expressApp.use(express.urlencoded({ extended: true }));
 
 // Handle WhatsApp messages
-app.post('/whatsapp', (req, res) => {
+expressApp.post('/whatsapp', (req, res) => {
   const twiml = new twilio.twiml.MessagingResponse();
   const msg = req.body.Body.toLowerCase();
   const from = req.body.From;
@@ -32,17 +32,17 @@ Reply with 1, 2, or 3.`);
   // Report lost
   else if (msg === '1') {
     twiml.message('🔍 **Kwasu Lost And Found Bot**\nReply with: ITEM, LOCATION (e.g., "Water Bottle, Library")');
-    db.ref(`users/${from}`).set({ action: 'report_lost' });
+    set(ref(db, `users/${from}`), { action: 'report_lost' });
   }
   // Report found
   else if (msg === '2') {
     twiml.message('🎁 **Kwasu Lost And Found Bot**\nReply with: ITEM, LOCATION (e.g., "Keys, Cafeteria")');
-    db.ref(`users/${from}`).set({ action: 'report_found' });
+    set(ref(db, `users/${from}`), { action: 'report_found' });
   }
   // Search
   else if (msg === '3') {
     twiml.message('🔎 **Kwasu Lost And Found Bot**\nReply with a keyword (e.g., "water", "keys")');
-    db.ref(`users/${from}`).set({ action: 'search' });
+    set(ref(db, `users/${from}`), { action: 'search' });
   }
   // Handle responses
   else {
@@ -53,7 +53,9 @@ Reply with 1, 2, or 3.`);
 });
 
 async function handleResponse(from, msg, twiml) {
-  const user = (await db.ref(`users/${from}`).once('value')).val();
+  const userSnapshot = await get(child(ref(db), `users/${from}`));
+  const user = userSnapshot.val();
+  
   if (!user) {
     twiml.message('❓ Invalid command. Reply "menu" for options.');
     return;
@@ -67,7 +69,8 @@ async function handleResponse(from, msg, twiml) {
       return;
     }
 
-    await db.ref('reports').push({
+    const newReportRef = push(ref(db, 'reports'));
+    await set(newReportRef, {
       type: user.action === 'report_lost' ? 'lost' : 'found',
       item,
       location,
@@ -76,24 +79,36 @@ async function handleResponse(from, msg, twiml) {
     });
 
     twiml.message(`✅ **Kwasu Lost And Found Bot**\n${user.action === 'report_lost' ? 'Lost' : 'Found'} item reported!`);
-    db.ref(`users/${from}`).remove();
+    remove(ref(db, `users/${from}`));
   }
   // Search
   else if (user.action === 'search') {
-    const reports = (await db.ref('reports').orderByChild('item').equalTo(msg).once('value')).val();
+    const reportsSnapshot = await get(child(ref(db), 'reports'));
+    const reports = reportsSnapshot.val();
+    
     if (!reports) {
       twiml.message('❌ No items found.');
       return;
     }
 
     let response = `🔍 **Kwasu Lost And Found Bot**\nFound items matching "${msg}":\n\n`;
-    Object.values(reports).forEach(report => {
-      response += `📦 ${report.item}\n📍 ${report.location}\n⏰ ${new Date(report.timestamp).toLocaleString()}\n\n`;
+    let found = false;
+    
+    Object.entries(reports).forEach(([key, report]) => {
+      if (report.item.toLowerCase().includes(msg)) {
+        found = true;
+        response += `📦 ${report.item}\n📍 ${report.location}\n⏰ ${new Date(report.timestamp).toLocaleString()}\n\n`;
+      }
     });
+    
+    if (!found) {
+      response = `❌ No items found matching "${msg}".`;
+    }
+    
     twiml.message(response);
-    db.ref(`users/${from}`).remove();
+    remove(ref(db, `users/${from}`));
   }
 }
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log('Kwasu Lost And Found Bot running!'));
+expressApp.listen(PORT, () => console.log('Kwasu Lost And Found Bot running!'));
