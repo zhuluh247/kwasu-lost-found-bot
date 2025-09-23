@@ -97,24 +97,62 @@ async function handleResponse(from, msg, twiml) {
       await set(newReportRef, reportData);
 
       // Send confirmation
-      let confirmationMsg = `✅ *${user.action === 'report_lost' ? 'Lost' : 'Found'} Item Reported!*\n\nItem: ${item}\nLocation: ${location}`;
-      
       if (user.action === 'report_lost') {
-        confirmationMsg += `\nDescription: ${reportData.description}`;
+        // Enhanced confirmation for lost items
+        let confirmationMsg = `✅ *Lost Item Reported Successfully!*\n\n`;
+        confirmationMsg += `📦 *Item:* ${item}\n`;
+        confirmationMsg += `📍 *Location:* ${location}\n`;
+        confirmationMsg += `📝 *Description:* ${reportData.description}\n\n`;
+        confirmationMsg += `🔍 *We're searching for matching found items...*\n\n`;
         
         // Check for matching found items
         const foundItems = await findMatchingFoundItems(item);
         if (foundItems.length > 0) {
-          confirmationMsg += `\n\n🎉 Good news! We found ${foundItems.length} matching item(s) that were reported found:\n\n`;
+          confirmationMsg += `🎉 *Good news!* We found ${foundItems.length} matching item(s) that were reported found:\n\n`;
           foundItems.forEach((item, index) => {
-            confirmationMsg += `${index + 1}. ${item.item}\n   📍 Location: ${item.location}\n   📞 Contact: ${item.contact_phone}\n   📝 ${item.description}\n   ⏰ ${new Date(item.timestamp).toLocaleString()}\n\n`;
+            confirmationMsg += `${index + 1}. *${item.item}*\n`;
+            confirmationMsg += `   📍 Location: ${item.location}\n`;
+            confirmationMsg += `   📞 Contact: ${item.contact_phone}\n`;
+            confirmationMsg += `   📝 ${item.description}\n`;
+            confirmationMsg += `   ⏰ ${new Date(item.timestamp).toLocaleString()}\n\n`;
           });
+          
+          confirmationMsg += `💡 *Tip:* When contacting, please provide details about your lost item to verify ownership.\n\n`;
+        } else {
+          confirmationMsg += `😔 *No matching found items yet.*\n\n`;
+          confirmationMsg += `💡 *What to do next:*\n`;
+          confirmationMsg += `• Check back regularly for updates\n`;
+          confirmationMsg += `• Spread the word about your lost item\n`;
+          confirmationMsg += `• Contact locations where you might have lost it\n\n`;
         }
+        
+        confirmationMsg += `🙏 *Thank you for using KWASU Lost & Found Bot!*`;
+        twiml.message(confirmationMsg);
       } else {
-        confirmationMsg += `\n📞 Contact: ${reportData.contact_phone}\nDescription: ${reportData.description}`;
+        // Confirmation with safety warning for found items
+        let confirmationMsg = `✅ *Found Item Reported Successfully!*\n\n`;
+        confirmationMsg += `📦 *Item:* ${item}\n`;
+        confirmationMsg += `📍 *Location:* ${location}\n`;
+        confirmationMsg += `📞 *Contact:* ${reportData.contact_phone}\n`;
+        confirmationMsg += `📝 *Description:* ${reportData.description}\n\n`;
+        
+        // Safety warning
+        confirmationMsg += `⚠️ *IMPORTANT SAFETY NOTICE:*\n\n`;
+        confirmationMsg += `When someone contacts you to claim this item, please:\n\n`;
+        confirmationMsg += `🔐 *Ask for verification* - Request specific details about the item such as:\n`;
+        confirmationMsg += `• Exact color\n`;
+        confirmationMsg += `• Shape or size\n`;
+        confirmationMsg += `• Visible marks, scratches, or unique features\n`;
+        confirmationMsg += `• Contents (if applicable)\n\n`;
+        confirmationMsg += `🚫 *Report false claimants* - If someone provides incorrect details:\n`;
+        confirmationMsg += `• Do not return the item\n`;
+        confirmationMsg += `• Contact KWASU WORKS immediately\n`;
+        confirmationMsg += `• Provide the claimant's phone number\n\n`;
+        confirmationMsg += `🛡️ *This helps maintain a safe community and prevents fraud.*\n\n`;
+        confirmationMsg += `🙏 *Thank you for your honesty and for helping others!*`;
+        
+        twiml.message(confirmationMsg);
       }
-      
-      twiml.message(confirmationMsg);
       
       // Clear user state
       await remove(ref(db, `users/${from}`));
@@ -138,7 +176,9 @@ async function handleResponse(from, msg, twiml) {
         const searchText = `${report.item} ${report.location} ${report.description}`.toLowerCase();
         if (searchText.includes(msg.toLowerCase())) {
           found = true;
-          response += `📦 ${report.item}\n📍 ${report.location}\n📝 ${report.description}`;
+          response += `📦 *${report.item}*\n`;
+          response += `📍 Location: ${report.location}\n`;
+          response += `📝 ${report.description}`;
           if (report.type === 'found') {
             response += `\n📞 Contact: ${report.contact_phone}`;
           }
