@@ -24,25 +24,21 @@ expressApp.post('/whatsapp', async (req, res) => {
   try {
     // Main menu
     if (msg === 'menu') {
-      twiml.message(`📋 **Kwasu Lost And Found Bot** Menu:
-1. Report Lost Item
-2. Report Found Item
-3. Search Items
-Reply with 1, 2, or 3.`);
+      twiml.message(`📋 *Welcome to Kwasu Lost And Found Bot!*\n_v0.1 Designed & Developed by_ Rugged of ICT.\n\nTo proceed with, Select what you are here for from the menu:\n\n1. *Report Lost Item*\n2. *Report Found Item*\n3. *Search for my lost Item*\n\nKindly Reply with 1, 2, or 3.`);
     } 
     // Report lost
     else if (msg === '1') {
-      twiml.message('🔍 **Kwasu Lost And Found Bot**\nReply with: ITEM, LOCATION, DESCRIPTION (e.g., "Water Bottle, Library, Blue with sticker")');
+      twiml.message('🔍 *Report Lost Item*\n\nPlease provide the following details:\nITEM, LOCATION, DESCRIPTION\n\nExample: "Water Bottle, Library, Blue with sticker"');
       await set(ref(db, `users/${from}`), { action: 'report_lost' });
     }
     // Report found
     else if (msg === '2') {
-      twiml.message('🎁 **Kwasu Lost And Found Bot**\nReply with: ITEM, LOCATION, CONTACT_PHONE (e.g., "Keys, Cafeteria, 08012345678")');
+      twiml.message('🎁 *Report Found Item*\n\nPlease provide the following details:\nITEM, LOCATION, CONTACT_PHONE\n\nExample: "Keys, Cafeteria, 08012345678"');
       await set(ref(db, `users/${from}`), { action: 'report_found' });
     }
     // Search
     else if (msg === '3') {
-      twiml.message('🔎 **Kwasu Lost And Found Bot**\nReply with a keyword (e.g., "water", "keys")');
+      twiml.message('🔎 *Search for my lost Item*\n\nPlease reply with a keyword to search:\n\nExample: "water", "keys", "bag"');
       await set(ref(db, `users/${from}`), { action: 'search' });
     }
     // Handle responses
@@ -101,7 +97,7 @@ async function handleResponse(from, msg, twiml) {
       await set(newReportRef, reportData);
 
       // Send confirmation
-      let confirmationMsg = `✅ **Kwasu Lost And Found Bot**\n${user.action === 'report_lost' ? 'Lost' : 'Found'} item reported!\n\nItem: ${item}\nLocation: ${location}`;
+      let confirmationMsg = `✅ *${user.action === 'report_lost' ? 'Lost' : 'Found'} Item Reported!*\n\nItem: ${item}\nLocation: ${location}`;
       
       if (user.action === 'report_lost') {
         confirmationMsg += `\nDescription: ${reportData.description}`;
@@ -134,7 +130,7 @@ async function handleResponse(from, msg, twiml) {
         return;
       }
 
-      let response = `🔍 **Kwasu Lost And Found Bot**\nFound items matching "${msg}":\n\n`;
+      let response = `🔎 *Search Results*\n\nFound items matching "${msg}":\n\n`;
       let found = false;
       
       // Search in item names, locations, and descriptions
