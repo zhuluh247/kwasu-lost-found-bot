@@ -61,7 +61,8 @@ expressApp.post('/whatsapp', async (req, res) => {
 async function handleResponse(from, msg, twiml) {
   try {
     // Get user state
-    const userSnapshot = await get(child(ref(db, `users/${from}`)));
+    const userRef = ref(db, `users/${from}`);
+    const userSnapshot = await get(userRef);
     const user = userSnapshot.val();
     
     if (!user) {
@@ -97,7 +98,8 @@ async function handleResponse(from, msg, twiml) {
       }
       
       // Save to Firebase
-      const newReportRef = push(ref(db, 'reports'));
+      const reportsRef = ref(db, 'reports');
+      const newReportRef = push(reportsRef);
       await set(newReportRef, reportData);
 
       // Send confirmation
@@ -126,7 +128,8 @@ async function handleResponse(from, msg, twiml) {
     
     // Handle search
     else if (user.action === 'search') {
-      const reportsSnapshot = await get(child(ref(db, 'reports')));
+      const reportsRef = ref(db, 'reports');
+      const reportsSnapshot = await get(reportsRef);
       const reports = reportsSnapshot.val();
       
       if (!reports || Object.keys(reports).length === 0) {
@@ -165,7 +168,8 @@ async function handleResponse(from, msg, twiml) {
 // Helper function to find matching found items
 async function findMatchingFoundItems(searchItem) {
   try {
-    const reportsSnapshot = await get(child(ref(db, 'reports')));
+    const reportsRef = ref(db, 'reports');
+    const reportsSnapshot = await get(reportsRef);
     const reports = reportsSnapshot.val();
     
     if (!reports) return [];
