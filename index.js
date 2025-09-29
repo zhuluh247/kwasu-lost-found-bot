@@ -29,21 +29,21 @@ expressApp.post('/whatsapp', async (req, res) => {
   try {
     // Main menu
     if (msg.toLowerCase() === 'menu') {
-      twiml.message(`📋 *KWASU Lost & Found Bot*\n\n1. Report Lost Item\n2. Report Found Item\n3. Search Items\n4. My Reports\n\nReply with 1, 2, 3, or 4.`);
+      twiml.message(`📋 *Welcome to Kwasu Lost And Found Bot!*\n_v0.1 Designed & Developed by_ Rugged of ICT.\n\nTo proceed with, Select what you are here for from the menu:\n\n1. *Report Lost Item*\n2. *Report Found Item*\n3. *Search for my lost Item*\n4. *My Reports*\n\nKindly Reply with 1, 2, 3, or 4.`);
     } 
     // Report lost
     else if (msg === '1') {
-      twiml.message('🔍 *Report Lost Item*\n\nFormat: ITEM, LOCATION, DESCRIPTION\n\nExample: "Water Bottle, Library, Blue with sticker"');
+      twiml.message('🔍 *Report Lost Item*\n\nPlease provide the following details:\nITEM, LOCATION, DESCRIPTION\n\nExample: "Water Bottle, Library, Blue with sticker"');
       await set(ref(db, `users/${from}`), { action: 'report_lost' });
     }
     // Report found
     else if (msg === '2') {
-      twiml.message('🎁 *Report Found Item*\n\nFormat: ITEM, LOCATION, YOUR_PHONE\n\nExample: "Keys, Cafeteria, 08012345678"');
+      twiml.message('🎁 *Report Found Item*\n\nPlease provide the following details:\nITEM, LOCATION, CONTACT_PHONE\n\nExample: "Keys, Cafeteria, 08012345678"');
       await set(ref(db, `users/${from}`), { action: 'report_found' });
     }
     // Search
     else if (msg === '3') {
-      twiml.message('🔎 *Search Items*\n\nReply with a keyword:\n\nExample: "water", "keys", "bag"');
+      twiml.message('🔎 *Search for my lost Item*\n\nPlease reply with a keyword to search:\n\nExample: "water", "keys", "bag"');
       await set(ref(db, `users/${from}`), { action: 'search' });
     }
     // My reports
@@ -163,11 +163,22 @@ async function handleResponse(from, msg, twiml) {
       
       const statusType = report.type === 'lost' ? 'recovered' : 'claimed';
       
-      let message = `🔐 *Verification Required*\n\n`;
-      message += `To mark this item as ${statusType}, enter your verification code.\n\n`;
-      message += `Item: ${report.item}\n`;
-      message += `Location: ${report.location}\n\n`;
-      message += `Reply with your 6-character code:`;
+      // Show report details and ask for verification
+      let message = `📋 *Report Details*\n\n`;
+      message += `📦 *Item:* ${report.item}\n`;
+      message += `📍 *Location:* ${report.location}\n`;
+      message += `🔐 *Verification Code:* ${report.verification_code}\n`;
+      
+      if (report.type === 'lost') {
+        message += `📝 *Description:* ${report.description}\n`;
+        message += `📊 *Status:* ${report.recovered ? '✅ Recovered' : '❌ Not Recovered'}\n`;
+      } else {
+        message += `📞 *Contact:* ${report.contact_phone}\n`;
+        message += `📝 *Description:* ${report.description}\n`;
+        message += `📊 *Status:* ${report.claimed ? '✅ Claimed' : '❌ Not Claimed'}\n`;
+      }
+      
+      message += `\nTo mark this item as ${statusType}, reply with your verification code:`;
       
       await set(ref(db, `users/${from}`), { 
         action: 'verify_code',
@@ -261,7 +272,8 @@ async function handleResponse(from, msg, twiml) {
       if (user.action === 'report_lost') {
         twiml.message(`✅ Lost item reported!\n\nItem: ${item}\nLocation: ${location}\nDescription: ${reportData.description}\n\nVerification Code: ${verificationCode}\n\nSave this code to mark as recovered later.`);
       } else {
-        twiml.message(`✅ Found item reported!\n\nItem: ${item}\nLocation: ${location}\nContact: ${reportData.contact_phone}\n\nVerification Code: ${verificationCode}\n\nSave this code to mark as claimed later.`);
+        let confirmationMsg = `✅ Found item reported!\n\nItem: ${item}\nLocation: ${location}\nContact: ${reportData.contact_phone}\n\nVerification Code: ${verificationCode}\n\nSave this code to mark as claimed later.\n\n⚠️ *Tip:* When someone contacts to claim, ask for item details to verify ownership.`;
+        twiml.message(confirmationMsg);
       }
       
       // Clear user state
