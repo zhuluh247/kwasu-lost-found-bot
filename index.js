@@ -27,32 +27,38 @@ expressApp.post('/whatsapp', async (req, res) => {
   const from = req.body.From;
 
   try {
-    // Main menu
+    // First check if user has an existing state
+    const userSnapshot = await get(child(ref(db), `users/${from}`));
+    const user = userSnapshot.val();
+
+    // If user has an existing state, handle it directly
+    if (user) {
+      await handleResponse(from, msg, twiml);
+      res.type('text/xml').send(twiml.toString());
+      return;
+    }
+
+    // If no existing state, process menu commands
     if (msg.toLowerCase() === 'menu') {
       twiml.message(`📋 *Welcome to Kwasu Lost And Found Bot!*\n_v0.1 Designed & Developed by_ Rugged of ICT.\n\nTo proceed with, Select what you are here for from the menu:\n\n1. *Report Lost Item*\n2. *Report Found Item*\n3. *Search for my lost Item*\n4. *My Reports*\n\nKindly Reply with 1, 2, 3, or 4.`);
     } 
-    // Report lost
     else if (msg === '1') {
       twiml.message('🔍 *Report Lost Item*\n\nPlease provide the following details:\nITEM, LOCATION, DESCRIPTION\n\nExample: "Water Bottle, Library, Blue with sticker"');
       await set(ref(db, `users/${from}`), { action: 'report_lost' });
     }
-    // Report found
     else if (msg === '2') {
       twiml.message('🎁 *Report Found Item*\n\nPlease provide the following details:\nITEM, LOCATION, CONTACT_PHONE\n\nExample: "Keys, Cafeteria, 08012345678"');
       await set(ref(db, `users/${from}`), { action: 'report_found' });
     }
-    // Search
     else if (msg === '3') {
       twiml.message('🔎 *Search for my lost Item*\n\nPlease reply with a keyword to search:\n\nExample: "water", "keys", "bag"');
       await set(ref(db, `users/${from}`), { action: 'search' });
     }
-    // My reports
     else if (msg === '4') {
       await showUserReports(from, twiml);
     }
-    // Handle responses
     else {
-      await handleResponse(from, msg, twiml);
+      twiml.message('❓ Invalid command. Reply "menu" for options.');
     }
 
     res.type('text/xml').send(twiml.toString());
@@ -139,7 +145,7 @@ async function handleResponse(from, msg, twiml) {
     const user = userSnapshot.val();
     
     if (!user) {
-      twiml.message('❓ Invalid command. Reply "menu" for options.');
+      twiml.message('❓ Session expired. Reply "menu" for options.');
       return;
     }
 
@@ -267,6 +273,15 @@ async function handleResponse(from, msg, twiml) {
       // Save to Firebase
       const newReportRef = push(ref(db, 'reports'));
       await set(newReportRef, reportData);
+      
+      // Verify the data was saved correctly
+      const savedReportSnapshot = await get(newReportRef);
+      const savedReport = savedReportSnapshot.val();
+      
+      if (!savedReport) {
+        twiml.message('❌ Error saving your report. Please try again.');
+        return;
+      }
 
       // Send confirmation
       if (user.action === 'report_lost') {
@@ -317,6 +332,39 @@ async function handleResponse(from, msg, twiml) {
   } catch (error) {
     console.error('Handle response error:', error);
     twiml.message('❌ Error. Please try again.');
+  }
+}
+
+// Helper function to find matching found items
+async function findMatchingFoundItems(searchItem) {
+  try {
+    const reportsRef = ref(db, 'reports');
+    const reportsSnapshot = await get(reportsRef);
+    const reports = reportsSnapshot.val();
+    
+    if (!reports) return [];
+    
+    const searchKeywords = searchItem.toLowerCase().split(' ');
+    const matchingItems = [];
+    
+    Object.entries(reports).forEach(([key, report]) => {
+      if (report.type === 'found') {
+        const reportText = `${report.item} ${report.description}`.toLowerCase();
+        const matchScore = searchKeywords.reduce((score, keyword) => {
+          return score + (reportText.includes(keyword) ? 1 : 0);
+        }, 0);
+        
+        if (matchScore > 0) {
+          matchingItems.push({...report, matchScore});
+        }
+      }
+    });
+    
+    // Sort by match score (highest first)
+    return matchingItems.sort((a, b) => b.matchScore - a.matchScore);
+  } catch (error) {
+    console.error('Error finding matching items:', error);
+    return [];
   }
 }
 
