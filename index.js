@@ -327,11 +327,13 @@ async function handleResponse(from, msg, twiml) {
     
     // Handle search
     else if (user.action === 'search') {
-      const reportsSnapshot = await get(child(ref(db), 'reports'));
+      const reportsRef = ref(db, 'reports');
+      const reportsSnapshot = await get(reportsRef);
       const reports = reportsSnapshot.val();
       
       if (!reports || Object.keys(reports).length === 0) {
         twiml.message('❌ No items found in the database.');
+        await remove(ref(db, `users/${from}`));
         return;
       }
 
@@ -369,7 +371,8 @@ async function handleResponse(from, msg, twiml) {
 // Helper function to find matching found items
 async function findMatchingFoundItems(searchItem) {
   try {
-    const reportsSnapshot = await get(child(ref(db), 'reports'));
+    const reportsRef = ref(db, 'reports');
+    const reportsSnapshot = await get(reportsRef);
     const reports = reportsSnapshot.val();
     
     if (!reports) return [];
