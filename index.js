@@ -1,7 +1,7 @@
 const express = require('express');
 const twilio = require('twilio');
 const { initializeApp } = require('firebase/app');
-const { getDatabase, ref, push, set, get, child, remove, update } = require('firebase/database');
+const { getDatabase, ref, push, set, get, child, remove } = require('firebase/database');
 require('dotenv').config();
 
 // Initialize Firebase
@@ -15,11 +15,6 @@ const db = getDatabase(app);
 const expressApp = express();
 expressApp.use(express.urlencoded({ extended: true }));
 
-// Helper function to generate verification code
-function generateVerificationCode() {
-  return Math.random().toString(36).substring(2, 8).toUpperCase();
-}
-
 // Handle WhatsApp messages
 expressApp.post('/whatsapp', async (req, res) => {
   const twiml = new twilio.twiml.MessagingResponse();
@@ -29,7 +24,7 @@ expressApp.post('/whatsapp', async (req, res) => {
   try {
     // Main menu
     if (msg === 'menu') {
-      twiml.message(`📋 *Welcome to Kwasu Lost And Found Bot!*\n_v0.2 Designed & Developed by_ Rugged of ICT.\n\nTo proceed with, Select what you are here for from the menu:\n\n1. *Report Lost Item*\n2. *Report Found Item*\n3. *Search for my lost Item*\n4. *My Reports*\n\nKindly Reply with 1, 2, 3, or 4.`);
+      twiml.message(`📋 *Welcome to Kwasu Lost And Found Bot!*\n_v0.1 Designed & Developed by_ Rugged of ICT.\n\nTo proceed with, Select what you are here for from the menu:\n\n1. *Report Lost Item*\n2. *Report Found Item*\n3. *Search for my lost Item*\n\nKindly Reply with 1, 2, or 3.`);
     } 
     // Report lost
     else if (msg === '1') {
@@ -46,10 +41,6 @@ expressApp.post('/whatsapp', async (req, res) => {
       twiml.message('🔎 *Search for my lost Item*\n\nPlease reply with a keyword to search:\n\nExample: "water", "keys", "bag"');
       await set(ref(db, `users/${from}`), { action: 'search' });
     }
-    // My Reports
-    else if (msg === '4') {
-      await showUserReports(from, twiml);
-    }
     // Handle responses
     else {
       await handleResponse(from, msg, twiml);
@@ -63,79 +54,6 @@ expressApp.post('/whatsapp', async (req, res) => {
   }
 });
 
-async function showUserReports(from, twiml) {
-  try {
-    const reportsRef = ref(db, 'reports');
-    const reportsSnapshot = await get(reportsRef);
-    const reports = reportsSnapshot.val();
-    
-    if (!reports || Object.keys(reports).length === 0) {
-      twiml.message('❌ You have not reported any items yet.\n\nUse the menu to report a lost or found item.');
-      await set(ref(db, `users/${from}`), { action: 'menu' });
-      return;
-    }
-    
-    let response = `📋 *Your Reports*\n\n`;
-    let hasReports = false;
-    let reportNumbers = [];
-    
-    Object.entries(reports).forEach(([key, report]) => {
-      if (report.reporter === from) {
-        hasReports = true;
-        const date = new Date(report.timestamp).toLocaleString();
-        reportNumbers.push(key);
-        
-        if (report.type === 'lost') {
-          const status = report.recovered ? '✅ Recovered' : '❌ Not Recovered';
-          response += `${reportNumbers.length}. 🔍 *Lost Item: ${report.item}*\n`;
-          response += `📍 Location: ${report.location}\n`;
-          response += `📅 Reported: ${date}\n`;
-          response += `📊 Status: ${status}\n`;
-          response += `🔐 Verification Code: ${report.verification_code}\n\n`;
-          
-          if (!report.recovered) {
-            response += `💡 Reply with *${reportNumbers.length}* to mark as recovered\n\n`;
-          }
-        } else {
-          const status = report.claimed ? '✅ Claimed' : '❌ Not Claimed';
-          response += `${reportNumbers.length}. 🎁 *Found Item: ${report.item}*\n`;
-          response += `📍 Location: ${report.location}\n`;
-          response += `📅 Reported: ${date}\n`;
-          response += `📊 Status: ${status}\n`;
-          response += `🔐 Verification Code: ${report.verification_code}\n\n`;
-          
-          if (!report.claimed) {
-            response += `💡 Reply with *${reportNumbers.length}* to mark as claimed\n\n`;
-          }
-        }
-      }
-    });
-    
-    if (!hasReports) {
-      response = '❌ You have not reported any items yet.\n\nUse the menu to report a lost or found item.';
-    } else {
-      response += `💡 To manage a report, reply with its number (1, 2, 3...)\n`;
-      response += `💡 Reply *menu* to return to main menu`;
-    }
-    
-    twiml.message(response);
-    
-    // Store report numbers for later reference
-    if (hasReports) {
-      await set(ref(db, `users/${from}`), { 
-        action: 'select_report',
-        reportIds: reportNumbers
-      });
-    } else {
-      await set(ref(db, `users/${from}`), { action: 'menu' });
-    }
-  } catch (error) {
-    console.error('Show user reports error:', error);
-    twiml.message('❌ An error occurred while fetching your reports. Please try again.');
-    await set(ref(db, `users/${from}`), { action: 'menu' });
-  }
-}
-
 async function handleResponse(from, msg, twiml) {
   try {
     // Get user state
@@ -147,96 +65,8 @@ async function handleResponse(from, msg, twiml) {
       return;
     }
 
-    // Handle report selection
-    if (user.action === 'select_report') {
-      const reportNumber = parseInt(msg);
-      if (isNaN(reportNumber) || reportNumber < 1 || reportNumber > user.reportIds.length) {
-        twiml.message(`❌ Invalid selection. Please enter a number between 1 and ${user.reportIds.length}, or reply "menu" to return.`);
-        return;
-      }
-      
-      const reportId = user.reportIds[reportNumber - 1];
-      const reportRef = ref(db, `reports/${reportId}`);
-      const reportSnapshot = await get(reportRef);
-      const report = reportSnapshot.val();
-      
-      if (!report) {
-        twiml.message('❌ Report not found. It may have been deleted.');
-        await set(ref(db, `users/${from}`), { action: 'menu' });
-        return;
-      }
-      
-      if (report.reporter !== from) {
-        twiml.message('❌ You are not authorized to modify this report.');
-        await set(ref(db, `users/${from}`), { action: 'menu' });
-        return;
-      }
-      
-      // Check if already recovered/claimed
-      if ((report.type === 'lost' && report.recovered) || (report.type === 'found' && report.claimed)) {
-        const status = report.type === 'lost' ? 'recovered' : 'claimed';
-        twiml.message(`❌ This item has already been marked as ${status}.`);
-        await set(ref(db, `users/${from}`), { action: 'menu' });
-        return;
-      }
-      
-      // Ask for verification code
-      const statusType = report.type === 'lost' ? 'recovered' : 'claimed';
-      twiml.message(`🔐 *Verification Required*\n\nTo mark this item as ${statusType}, please enter your verification code.\n\n📦 *Item:* ${report.item}\n📍 *Location:* ${report.location}\n\n⚠️ *Important:* This verification code was provided when you first reported the item. If you don't have it, please contact the developer.\n\nPlease reply with your 6-character verification code:`);
-      
-      await set(ref(db, `users/${from}`), { 
-        action: 'verify_code',
-        reportId: reportId,
-        statusType: statusType
-      });
-    }
-    
-    // Handle verification code input
-    else if (user.action === 'verify_code') {
-      const verificationCode = msg.trim().toUpperCase();
-      
-      if (verificationCode.length !== 6) {
-        twiml.message('❌ Invalid verification code format. Please enter the 6-character code provided when you reported the item.');
-        return;
-      }
-      
-      // Get the report
-      const reportRef = ref(db, `reports/${user.reportId}`);
-      const reportSnapshot = await get(reportRef);
-      const report = reportSnapshot.val();
-      
-      if (!report) {
-        twiml.message('❌ Report not found. It may have been deleted.');
-        await set(ref(db, `users/${from}`), { action: 'menu' });
-        return;
-      }
-      
-      if (report.verification_code !== verificationCode) {
-        twiml.message('❌ Incorrect verification code. Please try again or contact the developer if you forgot your code.');
-        return;
-      }
-      
-      // Update the report status
-      const updateData = {};
-      if (user.statusType === 'claimed') {
-        updateData.claimed = true;
-        updateData.claimed_at = new Date().toISOString();
-      } else {
-        updateData.recovered = true;
-        updateData.recovered_at = new Date().toISOString();
-      }
-      
-      await update(reportRef, updateData);
-      
-      // Send confirmation
-      twiml.message(`✅ Item Successfully Marked as ${user.statusType === 'claimed' ? 'Claimed' : 'Recovered'}!\n\nItem: ${report.item}\nLocation: ${report.location}\n\nThank you for using this platform!`);
-      
-      // Clear user state
-      await remove(ref(db, `users/${from}`));
-    }
-    
     // Handle report submission
-    else if (user.action === 'report_lost' || user.action === 'report_found') {
+    if (user.action === 'report_lost' || user.action === 'report_found') {
       const parts = msg.split(',');
       if (parts.length < 3) {
         twiml.message(`⚠️ Format error. Please use: ${user.action === 'report_lost' ? 'ITEM, LOCATION, DESCRIPTION' : 'ITEM, LOCATION, CONTACT_PHONE'}`);
@@ -247,25 +77,19 @@ async function handleResponse(from, msg, twiml) {
       const location = parts[1].trim();
       const thirdPart = parts[2].trim();
       
-      // Generate verification code
-      const verificationCode = generateVerificationCode();
-      
       let reportData = {
         type: user.action.replace('report_', ''),
         item,
         location,
         reporter: from,
-        verification_code: verificationCode,
         timestamp: new Date().toISOString()
       };
       
       if (user.action === 'report_lost') {
         reportData.description = parts.slice(2).join(',').trim();
-        reportData.recovered = false;
       } else {
         reportData.contact_phone = thirdPart;
         reportData.description = parts.slice(3).join(',').trim() || 'No description';
-        reportData.claimed = false;
       }
       
       // Save to Firebase
@@ -278,9 +102,8 @@ async function handleResponse(from, msg, twiml) {
         let confirmationMsg = `✅ *Lost Item Reported Successfully!*\n\n`;
         confirmationMsg += `📦 *Item:* ${item}\n`;
         confirmationMsg += `📍 *Location:* ${location}\n`;
-        confirmationMsg += `📝 *Description:* ${reportData.description}\n`;
-        confirmationMsg += `🔐 *Verification Code:* ${verificationCode}\n\n`;
-        confirmationMsg += `💡 *Save this code - you'll need it to mark your item as recovered.*\n\n`;
+        confirmationMsg += `📝 *Description:* ${reportData.description}\n\n`;
+        confirmationMsg += `🔍 *We're searching for matching found items...*\n\n`;
         
         // Check for matching found items
         const foundItems = await findMatchingFoundItems(item);
@@ -306,17 +129,27 @@ async function handleResponse(from, msg, twiml) {
         confirmationMsg += `🙏 *Thank you for using KWASU Lost & Found Bot!*`;
         twiml.message(confirmationMsg);
       } else {
-        // Confirmation with safety warning for found items - SHORTENED VERSION
+        // Confirmation with safety warning for found items
         let confirmationMsg = `✅ *Found Item Reported Successfully!*\n\n`;
         confirmationMsg += `📦 *Item:* ${item}\n`;
         confirmationMsg += `📍 *Location:* ${location}\n`;
         confirmationMsg += `📞 *Contact:* ${reportData.contact_phone}\n`;
-        confirmationMsg += `📝 *Description:* ${reportData.description}\n`;
-        confirmationMsg += `🔐 *Verification Code:* ${verificationCode}\n\n`;
-        confirmationMsg += `💡 *Save this code - you'll need it to mark the item as claimed.*\n\n`;
+        confirmationMsg += `📝 *Description:* ${reportData.description}\n\n`;
         
-        // SHORT SAFETY TIPS (just 2-3 lines)
-        confirmationMsg += `⚠️ *Safety Tip:* Always verify ownership before returning items. Ask for specific details about the item to confirm it belongs to the claimant.`;
+        // Safety warning
+        confirmationMsg += `⚠️ *IMPORTANT SAFETY NOTICE:*\n\n`;
+        confirmationMsg += `When someone contacts you to claim this item, please:\n\n`;
+        confirmationMsg += `🔐 *Ask for verification* - Request specific details about the item such as:\n`;
+        confirmationMsg += `• Exact color\n`;
+        confirmationMsg += `• Shape or size\n`;
+        confirmationMsg += `• Visible marks, scratches, or unique features\n`;
+        confirmationMsg += `• Contents (if applicable)\n\n`;
+        confirmationMsg += `🚫 *Report false claimants* - If someone provides incorrect details:\n`;
+        confirmationMsg += `• Do not return the item\n`;
+        confirmationMsg += `• Contact KWASU WORKS immediately\n`;
+        confirmationMsg += `• Provide the claimant's phone number\n\n`;
+        confirmationMsg += `🛡️ *This helps maintain a safe community and prevents fraud.*\n\n`;
+        confirmationMsg += `🙏 *Thank you for your honesty and for helping others!*`;
         
         twiml.message(confirmationMsg);
       }
@@ -327,13 +160,11 @@ async function handleResponse(from, msg, twiml) {
     
     // Handle search
     else if (user.action === 'search') {
-      const reportsRef = ref(db, 'reports');
-      const reportsSnapshot = await get(reportsRef);
+      const reportsSnapshot = await get(child(ref(db), 'reports'));
       const reports = reportsSnapshot.val();
       
       if (!reports || Object.keys(reports).length === 0) {
         twiml.message('❌ No items found in the database.');
-        await remove(ref(db, `users/${from}`));
         return;
       }
 
@@ -371,8 +202,7 @@ async function handleResponse(from, msg, twiml) {
 // Helper function to find matching found items
 async function findMatchingFoundItems(searchItem) {
   try {
-    const reportsRef = ref(db, 'reports');
-    const reportsSnapshot = await get(reportsRef);
+    const reportsSnapshot = await get(child(ref(db), 'reports'));
     const reports = reportsSnapshot.val();
     
     if (!reports) return [];
