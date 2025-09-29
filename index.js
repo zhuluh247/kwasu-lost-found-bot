@@ -27,7 +27,17 @@ expressApp.post('/whatsapp', async (req, res) => {
   const from = req.body.From;
 
   try {
-    // First check if user has an existing state
+    // Handle menu command first (clears any existing state)
+    if (msg.toLowerCase() === 'menu') {
+      // Clear any existing user state
+      await remove(ref(db, `users/${from}`));
+      
+      twiml.message(`📋 *Welcome to Kwasu Lost And Found Bot!*\n_v0.1 Designed & Developed by_ Rugged of ICT.\n\nTo proceed with, Select what you are here for from the menu:\n\n1. *Report Lost Item*\n2. *Report Found Item*\n3. *Search for my lost Item*\n4. *My Reports*\n\nKindly Reply with 1, 2, 3, or 4.`);
+      res.type('text/xml').send(twiml.toString());
+      return;
+    }
+
+    // Check if user has an existing state
     const userSnapshot = await get(child(ref(db), `users/${from}`));
     const user = userSnapshot.val();
 
@@ -39,10 +49,7 @@ expressApp.post('/whatsapp', async (req, res) => {
     }
 
     // If no existing state, process menu commands
-    if (msg.toLowerCase() === 'menu') {
-      twiml.message(`📋 *Welcome to Kwasu Lost And Found Bot!*\n_v0.1 Designed & Developed by_ Rugged of ICT.\n\nTo proceed with, Select what you are here for from the menu:\n\n1. *Report Lost Item*\n2. *Report Found Item*\n3. *Search for my lost Item*\n4. *My Reports*\n\nKindly Reply with 1, 2, 3, or 4.`);
-    } 
-    else if (msg === '1') {
+    if (msg === '1') {
       twiml.message('🔍 *Report Lost Item*\n\nPlease provide the following details:\nITEM, LOCATION, DESCRIPTION\n\nExample: "Water Bottle, Library, Blue with sticker"');
       await set(ref(db, `users/${from}`), { action: 'report_lost' });
     }
@@ -332,39 +339,6 @@ async function handleResponse(from, msg, twiml) {
   } catch (error) {
     console.error('Handle response error:', error);
     twiml.message('❌ Error. Please try again.');
-  }
-}
-
-// Helper function to find matching found items
-async function findMatchingFoundItems(searchItem) {
-  try {
-    const reportsRef = ref(db, 'reports');
-    const reportsSnapshot = await get(reportsRef);
-    const reports = reportsSnapshot.val();
-    
-    if (!reports) return [];
-    
-    const searchKeywords = searchItem.toLowerCase().split(' ');
-    const matchingItems = [];
-    
-    Object.entries(reports).forEach(([key, report]) => {
-      if (report.type === 'found') {
-        const reportText = `${report.item} ${report.description}`.toLowerCase();
-        const matchScore = searchKeywords.reduce((score, keyword) => {
-          return score + (reportText.includes(keyword) ? 1 : 0);
-        }, 0);
-        
-        if (matchScore > 0) {
-          matchingItems.push({...report, matchScore});
-        }
-      }
-    });
-    
-    // Sort by match score (highest first)
-    return matchingItems.sort((a, b) => b.matchScore - a.matchScore);
-  } catch (error) {
-    console.error('Error finding matching items:', error);
-    return [];
   }
 }
 
