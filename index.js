@@ -52,7 +52,7 @@ async function findMatchingFoundItems(searchItem) {
   }
 }
 
-// Media message handler - NOW ONLY FOR FOUND ITEMS
+// Media message handler - NOW ONLY FOR FOUND ITEMS (ROBUST VERSION)
 async function handleMediaMessage(req, twiml) {
   const from = req.body.From;
   const numMedia = parseInt(req.body.NumMedia);
@@ -61,58 +61,73 @@ async function handleMediaMessage(req, twiml) {
     const userSnapshot = await get(child(ref(db), `users/${from}`));
     const user = userSnapshot.val();
     
-    // Check if user is in the correct state to report a found item with an image
     if (!user || user.action !== 'report_found' || user.step !== 'awaiting_image') {
       twiml.message('❌ Please start by selecting "Report Found Item" from the menu. Images are only required for found items.');
       return;
     }
 
-    // Process the first image received
     for (let i = 0; i < numMedia; i++) {
       const mediaUrl = req.body[`MediaUrl${i}`];
       const contentType = req.body[`MediaContentType${i}`];
       
-      if (contentType.startsWith('image/')) {
+      if (contentType && contentType.startsWith('image/')) {
         try {
-          // Download the image from Twilio as a binary buffer
+          console.log(`Downloading image from: ${mediaUrl}`);
+          
           const response = await axios.get(mediaUrl, {
             responseType: 'arraybuffer',
             auth: {
               username: process.env.TWILIO_ACCOUNT_SID,
               password: process.env.TWILIO_AUTH_TOKEN
-            }
+            },
+            timeout: 20000 // 20 second timeout
           });
 
-          // Convert the binary buffer to a base64 string
-          const base64Image = Buffer.from(response.data, 'binary').toString('base64');
+          // Check if we received any data
+          if (!response.data || response.data.length === 0) {
+            throw new Error("Received empty file from Twilio.");
+          }
           
-          // Create the data URI format
-          const imageUrl = `data:${contentType};base64,${base64Image}`;
+          console.log(`Image downloaded successfully. Size: ${response.data.length} bytes.`);
 
-          // Update user state to indicate image is received and await details
+          // Use the standard, more reliable buffer-to-base64 conversion
+          const base64Image = Buffer.from(response.data).toString('base64');
+          const imageUrl = `data:${contentType};base64,${base64Image}`;
+          
+          console.log(`Image converted to base64. Length: ${imageUrl.length}`);
+
+          // Update user state with the image
           await set(ref(db, `users/${from}`), {
             action: 'report_found',
             step: 'awaiting_details',
-            image_url: imageUrl // Store the image
+            image_url: imageUrl
           });
           
           twiml.message(`✅ Image received! Now, please provide the item details in this format:\n\nITEM, LOCATION, CONTACT_PHONE\n\nExample: "Keys, Cafeteria, 08012345678"`);
-          return; // Stop after processing the first image
+          return;
 
         } catch (imgError) {
-          console.error('Error processing image:', imgError);
-          twiml.message('❌ Error processing image. Please try again.');
+          console.error('Error processing image:', imgError.message);
+          
+          // Provide a more specific error message to the user based on the error type
+          let userMessage = '❌ Error processing image. Please try again.';
+          if (imgError.code === 'ECONNABORTED') {
+            userMessage = '❌ The image download timed out. Please try sending a smaller image or check your connection.';
+          } else if (imgError.response && imgError.response.status === 404) {
+            userMessage = '❌ The image link was invalid. Please try sending the image again.';
+          }
+          
+          twiml.message(userMessage);
           return;
         }
       }
     }
 
-    // If the loop finishes without finding a valid image
     twiml.message('❌ No valid images received. Please send an image of the found item to continue.');
 
   } catch (error) {
-    console.error('Error handling media:', error);
-    twiml.message('❌ An error occurred while processing your image. Please try again.');
+    console.error('FATAL ERROR in handleMediaMessage:', error);
+    twiml.message('❌ An unexpected server error occurred. Please try again later.');
   }
 }
 
@@ -196,6 +211,14 @@ async function handleResponse(from, msg, twiml) {
 
       // User is sending details after the image
       if (user.step === 'awaiting_details') {
+        // IMPORTANT: Check if the image was actually saved
+        if (!user.image_url) {
+          console.error(`Image data missing for user ${from} during found item report.`);
+          twiml.message('❌ An error occurred. The image was not saved correctly. Please start over by replying "menu".');
+          await remove(ref(db, `users/${from}`)); // Reset user state
+          return;
+        }
+
         const parts = msg.split(',');
         if (parts.length < 3) {
           twiml.message('⚠️ Format error. Please use: ITEM, LOCATION, CONTACT_PHONE\n\nExample: "Keys, Cafeteria, 08012345678"');
@@ -226,7 +249,7 @@ async function handleResponse(from, msg, twiml) {
         confirmationMsg += `📍 *Location:* ${location}\n`;
         confirmationMsg += `📞 *Contact:* ${contact_phone}\n`;
         confirmationMsg += `📝 *Description:* ${description}\n`;
-        confirmationMsg += `📷 *Image:* Attached\n\n`; // Now we know there's an image
+        confirmationMsg += `📷 *Image:* Attached\n\n`;
         
         confirmationMsg += `⚠️ *IMPORTANT SAFETY NOTICE:*\n\n`;
         confirmationMsg += `When someone contacts you to claim this item, please:\n\n`;
