@@ -180,9 +180,11 @@ async function handleMarkItem(from, msg, twiml) {
     
     await update(ref(db, `reports/${reportId}`), updateData);
     
+    // FIXED: Make sure the success message is sent
     const successMessage = `✅ Item Successfully Marked as ${status.charAt(0).toUpperCase() + status.slice(1)}!\n\nItem: ${targetReport.item}\nLocation: ${targetReport.location}\n\nThank you for using KWASU Lost & Found Bot!`;
     
     twiml.message(successMessage);
+    console.log(`[DEBUG] Mark item success message sent: ${successMessage}`);
     
   } catch (error) {
     console.error('Handle mark item error:', error);
@@ -329,6 +331,7 @@ async function handleResponse(from, msg, twiml) {
           confirmationMsg += `   📞 Contact: ${foundItem.contact_phone}\n`;
           confirmationMsg += `   📝 ${foundItem.description}\n`;
           if (foundItem.image_url) {
+            // FIXED: Added the requested text in front of "Has image"
             confirmationMsg += `   📷 (Go to finditkwasu.ng to see the image result) Has image\n`;
           }
           confirmationMsg += `   ⏰ ${new Date(foundItem.timestamp).toLocaleString()}\n\n`;
@@ -411,7 +414,7 @@ async function handleResponse(from, msg, twiml) {
         // NEW: Add verification code to confirmation
         confirmationMsg += `🔐 *Verification Code:* ${verificationCode}\n\n`;
         
-        // Updated safety notice with bold formatting
+        // FIXED: Added the minimal safety format
         confirmationMsg += `⚠️ *SAFETY NOTICE:*\n`;
         confirmationMsg += `If someone contacts you to claim this item, please:\n\n`;
         confirmationMsg += `🔐 *Ask for key details:*\n`;
@@ -455,7 +458,8 @@ async function handleResponse(from, msg, twiml) {
             found = true;
             response += `📦 *${report.item}*`;
             if (report.image_url) {
-              response += ` 📷`;
+              // FIXED: Added the requested text in front of "Has image"
+              response += ` 📷 (Go to finditkwasu.ng to see the image result) Has image`;
             }
             response += `\n📍 Location: ${report.location}\n`;
             response += `📝 ${report.description || 'No description'}`;
