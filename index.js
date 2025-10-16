@@ -198,7 +198,7 @@ async function handleMediaMessage(req, twiml) {
   const numMedia = parseInt(req.body.NumMedia);
   
   try {
-    const userSnapshot = await get(child(ref(db), `users/${from}`));
+    const userSnapshot = await get(child(ref(db, `users/${from}`)));
     const user = userSnapshot.val();
     
     if (!user || user.action !== 'report_found' || user.step !== 'awaiting_image') {
@@ -274,7 +274,8 @@ async function handleMediaMessage(req, twiml) {
 // Response handler
 async function handleResponse(from, msg, twiml) {
   try {
-    const userSnapshot = await get(child(ref(db, `users/${from}`));
+    // FIXED: Added missing closing parenthesis
+    const userSnapshot = await get(child(ref(db, `users/${from}`)));
     const user = userSnapshot.val();
     
     if (!user) {
