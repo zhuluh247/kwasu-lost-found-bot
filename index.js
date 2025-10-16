@@ -188,7 +188,8 @@ async function handleResponse(from, msg, twiml) {
           confirmationMsg += `   📞 Contact: ${foundItem.contact_phone}\n`;
           confirmationMsg += `   📝 ${foundItem.description}\n`;
           if (foundItem.image_url) {
-            confirmationMsg += `   📷 Has image\n`;
+            // MODIFIED: Added the requested text in front of "Has image"
+            confirmationMsg += `   📷 (Go to finditkwasu.ng to see the image result) Has image\n`;
           }
           confirmationMsg += `   ⏰ ${new Date(foundItem.timestamp).toLocaleString()}\n\n`;
         });
@@ -307,7 +308,8 @@ async function handleResponse(from, msg, twiml) {
             found = true;
             response += `📦 *${report.item}*`;
             if (report.image_url) {
-              response += ` 📷`;
+              // MODIFIED: Added the requested text in front of "Has image"
+              response += ` 📷 (Go to finditkwasu.ng to see the image result) Has image`;
             }
             response += `\n📍 Location: ${report.location}\n`;
             response += `📝 ${report.description || 'No description'}`;
