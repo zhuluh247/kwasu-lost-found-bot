@@ -16,10 +16,10 @@ const db = getDatabase(app);
 const expressApp = express();
 expressApp.use(express.urlencoded({ extended: true }));
 
-// IMPROVED: Better matching function with more comprehensive search
+// SIMPLIFIED: Only find exact item name matches (case-insensitive)
 async function findMatchingFoundItems(searchItem) {
   try {
-    console.log(`[DEBUG] Searching for: "${searchItem}"`);
+    console.log(`[DEBUG] Searching for exact matches of: "${searchItem}"`);
     
     const reportsSnapshot = await get(child(ref(db), 'reports'));
     const reports = reportsSnapshot.val();
@@ -29,72 +29,26 @@ async function findMatchingFoundItems(searchItem) {
       return [];
     }
     
-    const searchKeywords = searchItem.toLowerCase().split(' ').filter(k => k.length > 0);
+    const searchItemLower = searchItem.toLowerCase().trim();
     const matchingItems = [];
-    
-    console.log(`[DEBUG] Search keywords: ${searchKeywords.join(', ')}`);
     
     Object.entries(reports).forEach(([key, report]) => {
       // Only include found items in the search results
       if (report.type === 'found') {
         const reportItem = (report.item || '').toLowerCase().trim();
-        const reportDescription = (report.description || '').toLowerCase().trim();
-        const reportText = `${reportItem} ${reportDescription}`;
         
         console.log(`[DEBUG] Checking found item: "${report.item}" (type: ${report.type})`);
         
-        let matchScore = 0;
-        
-        // PRIORITY 1: Exact item name match (highest priority)
-        if (reportItem === searchItem.toLowerCase()) {
-          matchScore = 100;
+        // Only match if the item name is exactly the same (case-insensitive)
+        if (reportItem === searchItemLower) {
           console.log(`[DEBUG] Exact match found: "${report.item}"`);
-        }
-        // PRIORITY 2: Search item contains reported item or vice versa
-        else if (reportItem.includes(searchItem.toLowerCase()) || searchItem.toLowerCase().includes(reportItem)) {
-          matchScore = 80;
-          console.log(`[DEBUG] Partial match found: "${report.item}"`);
-        }
-        // PRIORITY 3: Keyword matching
-        else {
-          searchKeywords.forEach(keyword => {
-            if (keyword.length > 1) { // Skip single characters
-              if (reportItem.includes(keyword)) {
-                matchScore += 3; // Higher weight for item name matches
-                console.log(`[DEBUG] Keyword "${keyword}" found in item name`);
-              }
-              if (reportDescription.includes(keyword)) {
-                matchScore += 1; // Lower weight for description matches
-                console.log(`[DEBUG] Keyword "${keyword}" found in description`);
-              }
-            }
-          });
-        }
-        
-        // Bonus points for having an image
-        if (report.image_url) {
-          matchScore += 2;
-        }
-        
-        // Bonus points for recent reports (within last 7 days)
-        const reportDate = new Date(report.timestamp);
-        const now = new Date();
-        const daysDiff = (now - reportDate) / (1000 * 60 * 60 * 24);
-        if (daysDiff <= 7) {
-          matchScore += 1;
-        }
-        
-        if (matchScore > 0) {
-          matchingItems.push({...report, matchScore, id: key});
-          console.log(`[DEBUG] Added "${report.item}" with score ${matchScore}`);
+          matchingItems.push({...report, id: key});
         }
       }
     });
     
-    const sortedMatches = matchingItems.sort((a, b) => b.matchScore - a.matchScore);
-    console.log(`[DEBUG] Found ${sortedMatches.length} matching items`);
-    
-    return sortedMatches;
+    console.log(`[DEBUG] Found ${matchingItems.length} exact matches`);
+    return matchingItems;
   } catch (error) {
     console.error('Error finding matching items:', error);
     return [];
@@ -249,7 +203,10 @@ async function handleResponse(from, msg, twiml) {
       }
       
       confirmationMsg += `🙏 *Thank you for using KWASU Lost & Found Bot!*`;
+      
+      // CRITICAL FIX: Make sure the message is sent
       twiml.message(confirmationMsg);
+      console.log(`[DEBUG] Sending response message: ${confirmationMsg.substring(0, 50)}...`);
       
       await remove(ref(db, `users/${from}`));
     }
@@ -325,7 +282,7 @@ async function handleResponse(from, msg, twiml) {
       }
     }
     
-    // Handle search - only show found items
+    // Handle search - only show exact matches for item names
     else if (user.action === 'search') {
       const reportsSnapshot = await get(child(ref(db), 'reports'));
       const reports = reportsSnapshot.val();
@@ -335,15 +292,18 @@ async function handleResponse(from, msg, twiml) {
         return;
       }
 
-      console.log(`[DEBUG] Manual search for: "${msg}"`);
+      console.log(`[DEBUG] Manual search for exact matches of: "${msg}"`);
       let response = `🔎 *Search Results*\n\nFound items matching "${msg}":\n\n`;
       let found = false;
       
       Object.entries(reports).forEach(([key, report]) => {
         // Only include found items in search results
         if (report.type === 'found') {
-          const searchText = `${report.item} ${report.location} ${report.description || ''}`.toLowerCase();
-          if (searchText.includes(msg.toLowerCase())) {
+          const reportItem = (report.item || '').toLowerCase().trim();
+          const searchItem = msg.toLowerCase().trim();
+          
+          // Only match if the item name is exactly the same (case-insensitive)
+          if (reportItem === searchItem) {
             found = true;
             response += `📦 *${report.item}*`;
             if (report.image_url) {
@@ -358,7 +318,7 @@ async function handleResponse(from, msg, twiml) {
       });
       
       if (!found) {
-        response = `❌ No found items matching "${msg}".\n\nTry searching with different keywords or check the spelling.`;
+        response = `❌ No found items matching "${msg}".\n\nTry searching with the exact item name.`;
       }
       
       twiml.message(response);
@@ -406,7 +366,7 @@ expressApp.post('/whatsapp', async (req, res) => {
     }
     // Search
     else if (msg === '3') {
-      twiml.message('🔎 *Search for my lost Item*\n\nPlease reply with a keyword to search:\n\nExample: "water", "keys", "bag"\n\n💡 *Tip:* Items with images are marked with 📷');
+      twiml.message('🔎 *Search for my lost Item*\n\nPlease reply with the exact item name to search:\n\nExample: "book", "keys", "bag"\n\n💡 *Tip:* Items with images are marked with 📷');
       await set(ref(db, `users/${from}`), { action: 'search' });
     }
     // Cancel option
