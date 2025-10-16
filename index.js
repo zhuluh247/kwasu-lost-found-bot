@@ -377,6 +377,15 @@ expressApp.get('/health', (req, res) => {
   res.status(200).json({ status: 'OK', timestamp: new Date().toISOString() });
 });
 
+// Add this to your server files (after the existing routes)
+expressApp.get('/keep-alive', (req, res) => {
+  res.status(200).json({ 
+    status: 'OK', 
+    timestamp: new Date().toISOString(),
+    service: 'KWASU Lost & Found Bot'
+  });
+});
+
 // Clean up expired user states (runs every 5 minutes)
 async function cleanupExpiredStates() {
   try {
@@ -405,3 +414,4 @@ expressApp.listen(PORT, () => {
   console.log(`📱 WhatsApp webhook: /whatsapp`);
   console.log(`💚 Health check: /health`);
 });
+
