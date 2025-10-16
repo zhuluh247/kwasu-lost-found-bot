@@ -5,7 +5,7 @@ const { getDatabase, ref, push, set, get, child, remove, update } = require('fir
 const axios = require('axios');
 require('dotenv').config();
 
-// Initialize Firebase Client SDK
+// Initialize Firebase Client SDK (your original configuration)
 const firebaseConfig = {
   databaseURL: process.env.FIREBASE_DATABASE_URL
 };
@@ -16,44 +16,42 @@ const db = getDatabase(app);
 const expressApp = express();
 expressApp.use(express.urlencoded({ extended: true }));
 
-// Helper function to generate verification code
+// NEW: Helper function to generate verification code
 function generateVerificationCode() {
   return Math.random().toString(36).substring(2, 8).toUpperCase();
 }
 
-// SIMPLIFIED: Only find exact item name matches (case-insensitive)
+// Helper function to find matching found items (keeping your original logic)
 async function findMatchingFoundItems(searchItem) {
   try {
-    console.log(`[DEBUG] Searching for exact matches of: "${searchItem}"`);
-    
     const reportsSnapshot = await get(child(ref(db), 'reports'));
     const reports = reportsSnapshot.val();
     
-    if (!reports) {
-      console.log('[DEBUG] No reports found in database');
-      return [];
-    }
+    if (!reports) return [];
     
-    const searchItemLower = searchItem.toLowerCase().trim();
+    const searchKeywords = searchItem.toLowerCase().split(' ');
     const matchingItems = [];
     
     Object.entries(reports).forEach(([key, report]) => {
       // Only include found items in the search results
       if (report.type === 'found') {
-        const reportItem = (report.item || '').toLowerCase().trim();
+        const reportText = `${report.item} ${report.description || ''}`.toLowerCase();
+        const matchScore = searchKeywords.reduce((score, keyword) => {
+          return score + (reportText.includes(keyword) ? 1 : 0);
+        }, 0);
         
-        console.log(`[DEBUG] Checking found item: "${report.item}" (type: ${report.type})`);
+        // Bonus points for having an image
+        if (report.image_url) {
+          matchScore += 2;
+        }
         
-        // Only match if the item name is exactly the same (case-insensitive)
-        if (reportItem === searchItemLower) {
-          console.log(`[DEBUG] Exact match found: "${report.item}"`);
-          matchingItems.push({...report, id: key});
+        if (matchScore > 0) {
+          matchingItems.push({...report, matchScore});
         }
       }
     });
     
-    console.log(`[DEBUG] Found ${matchingItems.length} exact matches`);
-    return matchingItems;
+    return matchingItems.sort((a, b) => b.matchScore - a.matchScore);
   } catch (error) {
     console.error('Error finding matching items:', error);
     return [];
@@ -192,13 +190,13 @@ async function handleMarkItem(from, msg, twiml) {
   }
 }
 
-// Media message handler - NOW ONLY FOR FOUND ITEMS (ROBUST VERSION)
+// Media message handler - RESTORED TO YOUR ORIGINAL VERSION
 async function handleMediaMessage(req, twiml) {
   const from = req.body.From;
   const numMedia = parseInt(req.body.NumMedia);
   
   try {
-    const userSnapshot = await get(child(ref(db, `users/${from}`)));
+    const userSnapshot = await get(child(ref(db), `users/${from}`));
     const user = userSnapshot.val();
     
     if (!user || user.action !== 'report_found' || user.step !== 'awaiting_image') {
@@ -271,11 +269,10 @@ async function handleMediaMessage(req, twiml) {
   }
 }
 
-// Response handler
+// Response handler - MINIMAL CHANGES TO ADD VERIFICATION CODE
 async function handleResponse(from, msg, twiml) {
   try {
-    // FIXED: Added missing closing parenthesis
-    const userSnapshot = await get(child(ref(db, `users/${from}`)));
+    const userSnapshot = await get(child(ref(db), `users/${from}`));
     const user = userSnapshot.val();
     
     if (!user) {
@@ -296,7 +293,7 @@ async function handleResponse(from, msg, twiml) {
       const location = parts[1].trim();
       const description = parts.slice(2).join(',').trim();
       
-      // Generate verification code
+      // NEW: Generate verification code
       const verificationCode = generateVerificationCode();
       
       const reportData = {
@@ -305,9 +302,10 @@ async function handleResponse(from, msg, twiml) {
         location,
         description,
         reporter: from,
+        timestamp: new Date().toISOString(),
+        // NEW: Add verification code and status
         verification_code: verificationCode,
-        recovered: false,
-        timestamp: new Date().toISOString()
+        recovered: false
       };
       
       const newReportRef = push(ref(db, 'reports'));
@@ -317,13 +315,12 @@ async function handleResponse(from, msg, twiml) {
       confirmationMsg += `📦 *Item:* ${item}\n`;
       confirmationMsg += `📍 *Location:* ${location}\n`;
       confirmationMsg += `📝 *Description:* ${description}\n`;
+      // NEW: Add verification code to confirmation
       confirmationMsg += `🔐 *Verification Code:* ${verificationCode}\n\n`;
       confirmationMsg += `🔍 *We're searching for matching found items...*\n\n`;
       
       // Search for matching found items (case-insensitive)
-      console.log(`[DEBUG] Searching for matches for lost item: "${item}"`);
       const foundItems = await findMatchingFoundItems(item);
-      
       if (foundItems.length > 0) {
         confirmationMsg += `🎉 *Good news!* We found ${foundItems.length} matching item(s):\n\n`;
         foundItems.forEach((foundItem, index) => {
@@ -346,13 +343,11 @@ async function handleResponse(from, msg, twiml) {
         confirmationMsg += `• Contact locations where you might have lost it\n\n`;
       }
       
+      // NEW: Add reminder about verification code
       confirmationMsg += `💡 *Save your verification code!*\n`;
       confirmationMsg += `You'll need it to mark this item as recovered later.\n\n`;
       confirmationMsg += `🙏 *Thank you for using KWASU Lost & Found Bot!*`;
-      
-      // CRITICAL FIX: Make sure the message is sent
       twiml.message(confirmationMsg);
-      console.log(`[DEBUG] Sending response message: ${confirmationMsg.substring(0, 50)}...`);
       
       await remove(ref(db, `users/${from}`));
     }
@@ -387,7 +382,7 @@ async function handleResponse(from, msg, twiml) {
         const contact_phone = parts[2].trim();
         const description = parts.slice(3).join(',').trim() || 'No description';
         
-        // Generate verification code
+        // NEW: Generate verification code
         const verificationCode = generateVerificationCode();
         
         const reportData = {
@@ -398,9 +393,10 @@ async function handleResponse(from, msg, twiml) {
           description,
           image_url: user.image_url, // Get the image from the user's state
           reporter: from,
+          timestamp: new Date().toISOString(),
+          // NEW: Add verification code and status
           verification_code: verificationCode,
-          claimed: false,
-          timestamp: new Date().toISOString()
+          claimed: false
         };
         
         const newReportRef = push(ref(db, 'reports'));
@@ -412,6 +408,7 @@ async function handleResponse(from, msg, twiml) {
         confirmationMsg += `📞 *Contact:* ${contact_phone}\n`;
         confirmationMsg += `📝 *Description:* ${description}\n`;
         confirmationMsg += `📷 *Image:* Attached\n`;
+        // NEW: Add verification code to confirmation
         confirmationMsg += `🔐 *Verification Code:* ${verificationCode}\n\n`;
         
         // Updated safety notice with bold formatting
@@ -426,6 +423,7 @@ async function handleResponse(from, msg, twiml) {
         confirmationMsg += `• *Contact KWASU WORKS*\n`;
         confirmationMsg += `• *Share the person's phone number*\n\n`;
         confirmationMsg += `🛡️ *This keeps our community safe.*\n\n`;
+        // NEW: Add reminder about verification code
         confirmationMsg += `💡 *Save your verification code!*\n`;
         confirmationMsg += `You'll need it to mark this item as claimed later.\n\n`;
         confirmationMsg += `🙏 *Thank you for your honesty!*`;
@@ -436,7 +434,7 @@ async function handleResponse(from, msg, twiml) {
       }
     }
     
-    // Handle search - only show exact matches for item names
+    // Handle search - only show found items
     else if (user.action === 'search') {
       const reportsSnapshot = await get(child(ref(db), 'reports'));
       const reports = reportsSnapshot.val();
@@ -446,22 +444,18 @@ async function handleResponse(from, msg, twiml) {
         return;
       }
 
-      console.log(`[DEBUG] Manual search for exact matches of: "${msg}"`);
       let response = `🔎 *Search Results*\n\nFound items matching "${msg}":\n\n`;
       let found = false;
       
       Object.entries(reports).forEach(([key, report]) => {
         // Only include found items in search results
         if (report.type === 'found') {
-          const reportItem = (report.item || '').toLowerCase().trim();
-          const searchItem = msg.toLowerCase().trim();
-          
-          // Only match if the item name is exactly the same (case-insensitive)
-          if (reportItem === searchItem) {
+          const searchText = `${report.item} ${report.location} ${report.description || ''}`.toLowerCase();
+          if (searchText.includes(msg.toLowerCase())) {
             found = true;
             response += `📦 *${report.item}*`;
             if (report.image_url) {
-              response += ` 📷 (Go to finditkwasu.ng to see the image result) Has image`;
+              response += ` 📷`;
             }
             response += `\n📍 Location: ${report.location}\n`;
             response += `📝 ${report.description || 'No description'}`;
@@ -472,7 +466,7 @@ async function handleResponse(from, msg, twiml) {
       });
       
       if (!found) {
-        response = `❌ No found items matching "${msg}".\n\nTry searching with the exact item name.`;
+        response = `❌ No found items matching "${msg}".\n\nTry searching with different keywords or check the spelling.`;
       }
       
       twiml.message(response);
@@ -484,7 +478,7 @@ async function handleResponse(from, msg, twiml) {
   }
 }
 
-// Main WhatsApp webhook handler
+// Main WhatsApp webhook handler - MINIMAL CHANGES TO ADD NEW MENU OPTIONS
 expressApp.post('/whatsapp', async (req, res) => {
   const twiml = new twilio.twiml.MessagingResponse();
   const msg = req.body.Body ? req.body.Body.toLowerCase().trim() : '';
@@ -500,7 +494,7 @@ expressApp.post('/whatsapp', async (req, res) => {
       return;
     }
 
-    // Main menu
+    // Main menu - UPDATED TO INCLUDE NEW OPTIONS
     if (msg === 'menu') {
       twiml.message(`📋 *Welcome to Kwasu Lost And Found Bot!*\n_v0.2 with Image Support - Designed & Developed by_ Rugged of ICT.\n\nTo proceed with, Select what you are here for from the menu:\n\n1. *Report Lost Item*\n2. *Report Found Item*\n3. *Search for my lost Item*\n4. *My Reports*\n5. *Mark Item as Claimed/Recovered*\n\nKindly Reply with 1, 2, 3, 4, or 5.`);
     } 
@@ -521,14 +515,14 @@ expressApp.post('/whatsapp', async (req, res) => {
     }
     // Search
     else if (msg === '3') {
-      twiml.message('🔎 *Search for my lost Item*\n\nPlease reply with the exact item name to search:\n\nExample: "book", "keys", "bag"\n\n💡 *Tip:* Items with images are marked with 📷');
+      twiml.message('🔎 *Search for my lost Item*\n\nPlease reply with a keyword to search:\n\nExample: "water", "keys", "bag"\n\n💡 *Tip:* Items with images are marked with 📷');
       await set(ref(db, `users/${from}`), { action: 'search' });
     }
-    // My reports
+    // NEW: My reports
     else if (msg === '4') {
       await showUserReports(from, twiml);
     }
-    // Mark item
+    // NEW: Mark item
     else if (msg === '5') {
       twiml.message('📝 *Mark Item as Claimed/Recovered*\n\nTo mark an item, reply with:\n\nMARK [CODE] [STATUS]\n\nExamples:\n• "MARK ABC123 CLAIMED" (for found items)\n• "MARK XYZ789 RECOVERED" (for lost items)\n\n💡 You can find your verification codes in option 4 (My Reports)');
     }
@@ -537,7 +531,7 @@ expressApp.post('/whatsapp', async (req, res) => {
       twiml.message('❌ Operation cancelled. Reply "menu" to start again.');
       await remove(ref(db, `users/${from}`));
     }
-    // Handle MARK commands
+    // NEW: Handle MARK commands
     else if (msg.startsWith('mark ')) {
       await handleMarkItem(from, originalMsg, twiml);
     }
@@ -568,28 +562,6 @@ expressApp.get('/keep-alive', (req, res) => {
   });
 });
 
-// DEBUG: Add endpoint to view all items for troubleshooting
-expressApp.get('/debug/items', async (req, res) => {
-  try {
-    const reportsSnapshot = await get(child(ref(db), 'reports'));
-    const reports = reportsSnapshot.val();
-    
-    const items = Object.entries(reports || {}).map(([key, report]) => ({
-      id: key,
-      type: report.type,
-      item: report.item,
-      location: report.location,
-      hasImage: !!report.image_url,
-      verificationCode: report.verification_code
-    }));
-    
-    res.json(items);
-  } catch (error) {
-    console.error('Debug error:', error);
-    res.status(500).json({ error: 'Failed to fetch items' });
-  }
-});
-
 // Clean up expired user states (runs every 5 minutes)
 async function cleanupExpiredStates() {
   try {
@@ -617,5 +589,4 @@ expressApp.listen(PORT, () => {
   console.log(`🚀 Kwasu Lost And Found Bot running on port ${PORT}`);
   console.log(`📱 WhatsApp webhook: /whatsapp`);
   console.log(`💚 Health check: /health`);
-  console.log(`🔍 Debug endpoint: /debug/items`);
 });
