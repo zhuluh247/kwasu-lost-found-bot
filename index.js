@@ -5,7 +5,7 @@ const { getDatabase, ref, push, set, get, child, remove } = require('firebase/da
 const axios = require('axios');
 require('dotenv').config();
 
-// Initialize Firebase Client SDK (your original configuration)
+// Initialize Firebase Client SDK
 const firebaseConfig = {
   databaseURL: process.env.FIREBASE_DATABASE_URL
 };
@@ -16,37 +16,85 @@ const db = getDatabase(app);
 const expressApp = express();
 expressApp.use(express.urlencoded({ extended: true }));
 
-// Helper function to find matching found items
+// IMPROVED: Better matching function with more comprehensive search
 async function findMatchingFoundItems(searchItem) {
   try {
+    console.log(`[DEBUG] Searching for: "${searchItem}"`);
+    
     const reportsSnapshot = await get(child(ref(db), 'reports'));
     const reports = reportsSnapshot.val();
     
-    if (!reports) return [];
+    if (!reports) {
+      console.log('[DEBUG] No reports found in database');
+      return [];
+    }
     
-    const searchKeywords = searchItem.toLowerCase().split(' ');
+    const searchKeywords = searchItem.toLowerCase().split(' ').filter(k => k.length > 0);
     const matchingItems = [];
+    
+    console.log(`[DEBUG] Search keywords: ${searchKeywords.join(', ')}`);
     
     Object.entries(reports).forEach(([key, report]) => {
       // Only include found items in the search results
       if (report.type === 'found') {
-        const reportText = `${report.item} ${report.description || ''}`.toLowerCase();
-        const matchScore = searchKeywords.reduce((score, keyword) => {
-          return score + (reportText.includes(keyword) ? 1 : 0);
-        }, 0);
+        const reportItem = (report.item || '').toLowerCase().trim();
+        const reportDescription = (report.description || '').toLowerCase().trim();
+        const reportText = `${reportItem} ${reportDescription}`;
+        
+        console.log(`[DEBUG] Checking found item: "${report.item}" (type: ${report.type})`);
+        
+        let matchScore = 0;
+        
+        // PRIORITY 1: Exact item name match (highest priority)
+        if (reportItem === searchItem.toLowerCase()) {
+          matchScore = 100;
+          console.log(`[DEBUG] Exact match found: "${report.item}"`);
+        }
+        // PRIORITY 2: Search item contains reported item or vice versa
+        else if (reportItem.includes(searchItem.toLowerCase()) || searchItem.toLowerCase().includes(reportItem)) {
+          matchScore = 80;
+          console.log(`[DEBUG] Partial match found: "${report.item}"`);
+        }
+        // PRIORITY 3: Keyword matching
+        else {
+          searchKeywords.forEach(keyword => {
+            if (keyword.length > 1) { // Skip single characters
+              if (reportItem.includes(keyword)) {
+                matchScore += 3; // Higher weight for item name matches
+                console.log(`[DEBUG] Keyword "${keyword}" found in item name`);
+              }
+              if (reportDescription.includes(keyword)) {
+                matchScore += 1; // Lower weight for description matches
+                console.log(`[DEBUG] Keyword "${keyword}" found in description`);
+              }
+            }
+          });
+        }
         
         // Bonus points for having an image
         if (report.image_url) {
           matchScore += 2;
         }
         
+        // Bonus points for recent reports (within last 7 days)
+        const reportDate = new Date(report.timestamp);
+        const now = new Date();
+        const daysDiff = (now - reportDate) / (1000 * 60 * 60 * 24);
+        if (daysDiff <= 7) {
+          matchScore += 1;
+        }
+        
         if (matchScore > 0) {
-          matchingItems.push({...report, matchScore});
+          matchingItems.push({...report, matchScore, id: key});
+          console.log(`[DEBUG] Added "${report.item}" with score ${matchScore}`);
         }
       }
     });
     
-    return matchingItems.sort((a, b) => b.matchScore - a.matchScore);
+    const sortedMatches = matchingItems.sort((a, b) => b.matchScore - a.matchScore);
+    console.log(`[DEBUG] Found ${sortedMatches.length} matching items`);
+    
+    return sortedMatches;
   } catch (error) {
     console.error('Error finding matching items:', error);
     return [];
@@ -175,7 +223,9 @@ async function handleResponse(from, msg, twiml) {
       confirmationMsg += `🔍 *We're searching for matching found items...*\n\n`;
       
       // Search for matching found items (case-insensitive)
+      console.log(`[DEBUG] Searching for matches for lost item: "${item}"`);
       const foundItems = await findMatchingFoundItems(item);
+      
       if (foundItems.length > 0) {
         confirmationMsg += `🎉 *Good news!* We found ${foundItems.length} matching item(s):\n\n`;
         foundItems.forEach((foundItem, index) => {
@@ -285,6 +335,7 @@ async function handleResponse(from, msg, twiml) {
         return;
       }
 
+      console.log(`[DEBUG] Manual search for: "${msg}"`);
       let response = `🔎 *Search Results*\n\nFound items matching "${msg}":\n\n`;
       let found = false;
       
@@ -390,6 +441,27 @@ expressApp.get('/keep-alive', (req, res) => {
   });
 });
 
+// DEBUG: Add endpoint to view all items for troubleshooting
+expressApp.get('/debug/items', async (req, res) => {
+  try {
+    const reportsSnapshot = await get(child(ref(db), 'reports'));
+    const reports = reportsSnapshot.val();
+    
+    const items = Object.entries(reports || {}).map(([key, report]) => ({
+      id: key,
+      type: report.type,
+      item: report.item,
+      location: report.location,
+      hasImage: !!report.image_url
+    }));
+    
+    res.json(items);
+  } catch (error) {
+    console.error('Debug error:', error);
+    res.status(500).json({ error: 'Failed to fetch items' });
+  }
+});
+
 // Clean up expired user states (runs every 5 minutes)
 async function cleanupExpiredStates() {
   try {
@@ -417,4 +489,5 @@ expressApp.listen(PORT, () => {
   console.log(`🚀 Kwasu Lost And Found Bot running on port ${PORT}`);
   console.log(`📱 WhatsApp webhook: /whatsapp`);
   console.log(`💚 Health check: /health`);
+  console.log(`🔍 Debug endpoint: /debug/items`);
 });
