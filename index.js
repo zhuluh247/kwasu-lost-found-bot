@@ -274,16 +274,23 @@ async function handleMediaMessage(req, twiml) {
 // Response handler - MINIMAL CHANGES TO ADD VERIFICATION CODE
 async function handleResponse(from, msg, twiml) {
   try {
+    console.log(`[DEBUG] handleResponse called for user ${from} with message: ${msg}`);
+    
     const userSnapshot = await get(child(ref(db), `users/${from}`));
     const user = userSnapshot.val();
     
+    console.log(`[DEBUG] User state: ${JSON.stringify(user)}`);
+    
     if (!user) {
+      console.log(`[DEBUG] No user state found for ${from}`);
       twiml.message('❓ Invalid command. Reply "menu" for options.');
       return;
     }
 
     // Handle LOST ITEM report (no image needed)
     if (user.action === 'report_lost') {
+      console.log(`[DEBUG] Processing lost item report`);
+      
       const parts = msg.split(',');
       if (parts.length < 3) {
         twiml.message('⚠️ Format error. Please use: ITEM, LOCATION, DESCRIPTION\n\nExample: "Water Bottle, Library, Blue with sticker"');
@@ -309,6 +316,8 @@ async function handleResponse(from, msg, twiml) {
         verification_code: verificationCode,
         recovered: false
       };
+      
+      console.log(`[DEBUG] Saving lost item report: ${JSON.stringify(reportData)}`);
       
       const newReportRef = push(ref(db, 'reports'));
       await set(newReportRef, reportData);
@@ -350,6 +359,8 @@ async function handleResponse(from, msg, twiml) {
       confirmationMsg += `💡 *Save your verification code!*\n`;
       confirmationMsg += `You'll need it to mark this item as recovered later.\n\n`;
       confirmationMsg += `🙏 *Thank you for using KWASU Lost & Found Bot!*`;
+      
+      console.log(`[DEBUG] Sending lost item confirmation message`);
       twiml.message(confirmationMsg);
       
       await remove(ref(db, `users/${from}`));
@@ -357,6 +368,8 @@ async function handleResponse(from, msg, twiml) {
     
     // Handle FOUND ITEM report (image is compulsory)
     else if (user.action === 'report_found') {
+      console.log(`[DEBUG] Processing found item report`);
+      
       // Check if user is trying to send text before an image
       if (user.step === 'awaiting_image') {
         twiml.message('⚠️ An image is required for found items. Please send an image of the item first.');
@@ -402,6 +415,8 @@ async function handleResponse(from, msg, twiml) {
           claimed: false
         };
         
+        console.log(`[DEBUG] Saving found item report: ${JSON.stringify(reportData)}`);
+        
         const newReportRef = push(ref(db, 'reports'));
         await set(newReportRef, reportData);
 
@@ -431,6 +446,7 @@ async function handleResponse(from, msg, twiml) {
         confirmationMsg += `You'll need it to mark this item as claimed later.\n\n`;
         confirmationMsg += `🙏 *Thank you for your honesty!*`;
         
+        console.log(`[DEBUG] Sending found item confirmation message`);
         twiml.message(confirmationMsg);
         
         await remove(ref(db, `users/${from}`));
@@ -439,6 +455,8 @@ async function handleResponse(from, msg, twiml) {
     
     // Handle search - only show found items
     else if (user.action === 'search') {
+      console.log(`[DEBUG] Processing search for: ${msg}`);
+      
       const reportsSnapshot = await get(child(ref(db), 'reports'));
       const reports = reportsSnapshot.val();
       
@@ -473,6 +491,7 @@ async function handleResponse(from, msg, twiml) {
         response = `❌ No found items matching "${msg}".\n\nTry searching with different keywords or check the spelling.`;
       }
       
+      console.log(`[DEBUG] Sending search results`);
       twiml.message(response);
       await remove(ref(db, `users/${from}`));
     }
@@ -490,9 +509,12 @@ expressApp.post('/whatsapp', async (req, res) => {
   const from = req.body.From;
   const numMedia = parseInt(req.body.NumMedia) || 0;
 
+  console.log(`[DEBUG] Received message from ${from}: "${msg}" (Media: ${numMedia})`);
+
   try {
     // Handle media messages
     if (numMedia > 0) {
+      console.log(`[DEBUG] Processing media message`);
       await handleMediaMessage(req, twiml);
       res.type('text/xml').send(twiml.toString());
       return;
@@ -500,50 +522,82 @@ expressApp.post('/whatsapp', async (req, res) => {
 
     // Main menu - UPDATED TO INCLUDE NEW OPTIONS
     if (msg === 'menu') {
+      console.log(`[DEBUG] Showing main menu`);
       twiml.message(`📋 *Welcome to Kwasu Lost And Found Bot!*\n_v0.2 with Image Support - Designed & Developed by_ Rugged of ICT.\n\nTo proceed with, Select what you are here for from the menu:\n\n1. *Report Lost Item*\n2. *Report Found Item*\n3. *Search for my lost Item*\n4. *My Reports*\n5. *Mark Item as Claimed/Recovered*\n\nKindly Reply with 1, 2, 3, 4, or 5.`);
     } 
     // Report lost
     else if (msg === '1') {
-      twiml.message('🔍 *Report Lost Item*\n\nPlease provide the following details:\nITEM, LOCATION, DESCRIPTION\n\nExample: "Water Bottle, Library, Blue with sticker"');
+      console.log(`[DEBUG] User selected option 1 - Report Lost Item`);
+      
+      // Clear any existing user state first
+      await remove(ref(db, `users/${from}`));
+      
+      // Set new user state
       await set(ref(db, `users/${from}`), { 
         action: 'report_lost'
       });
+      
+      console.log(`[DEBUG] Set user state for ${from} to report_lost`);
+      
+      // Send the instruction message
+      const instructionMsg = '🔍 *Report Lost Item*\n\nPlease provide the following details:\nITEM, LOCATION, DESCRIPTION\n\nExample: "Water Bottle, Library, Blue with sticker"';
+      twiml.message(instructionMsg);
+      console.log(`[DEBUG] Sent instruction message for lost item report`);
     }
     // Report found
     else if (msg === '2') {
-      twiml.message('🎁 *Report Found Item*\n\n📷 *Step 1:* Please send an image of the found item.\n\nAfter the image is received, you will be asked for the details.');
+      console.log(`[DEBUG] User selected option 2 - Report Found Item`);
+      
+      // Clear any existing user state first
+      await remove(ref(db, `users/${from}`));
+      
+      // Set new user state
       await set(ref(db, `users/${from}`), { 
         action: 'report_found',
         step: 'awaiting_image'
       });
+      
+      console.log(`[DEBUG] Set user state for ${from} to report_found`);
+      
+      // Send the instruction message
+      const instructionMsg = '🎁 *Report Found Item*\n\n📷 *Step 1:* Please send an image of the found item.\n\nAfter the image is received, you will be asked for the details.';
+      twiml.message(instructionMsg);
+      console.log(`[DEBUG] Sent instruction message for found item report`);
     }
     // Search
     else if (msg === '3') {
+      console.log(`[DEBUG] User selected option 3 - Search`);
       twiml.message('🔎 *Search for my lost Item*\n\nPlease reply with a keyword to search:\n\nExample: "water", "keys", "bag"\n\n💡 *Tip:* Items with images are marked with 📷');
       await set(ref(db, `users/${from}`), { action: 'search' });
     }
     // NEW: My reports
     else if (msg === '4') {
+      console.log(`[DEBUG] User selected option 4 - My Reports`);
       await showUserReports(from, twiml);
     }
     // NEW: Mark item
     else if (msg === '5') {
+      console.log(`[DEBUG] User selected option 5 - Mark Item`);
       twiml.message('📝 *Mark Item as Claimed/Recovered*\n\nTo mark an item, reply with:\n\nMARK [CODE] [STATUS]\n\nExamples:\n• "MARK ABC123 CLAIMED" (for found items)\n• "MARK XYZ789 RECOVERED" (for lost items)\n\n💡 You can find your verification codes in option 4 (My Reports)');
     }
     // Cancel option
     else if (msg === 'cancel' || msg === '0') {
+      console.log(`[DEBUG] User selected cancel`);
       twiml.message('❌ Operation cancelled. Reply "menu" to start again.');
       await remove(ref(db, `users/${from}`));
     }
     // NEW: Handle MARK commands
     else if (msg.startsWith('mark ')) {
+      console.log(`[DEBUG] Processing MARK command: ${msg}`);
       await handleMarkItem(from, originalMsg, twiml);
     }
     // Handle responses
     else {
+      console.log(`[DEBUG] Handling user response: ${msg}`);
       await handleResponse(from, originalMsg, twiml); // Pass the original message with case preserved
     }
 
+    console.log(`[DEBUG] Sending TwiML response`);
     res.type('text/xml').send(twiml.toString());
   } catch (error) {
     console.error('Main handler error:', error);
