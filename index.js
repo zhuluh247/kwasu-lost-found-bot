@@ -1,7 +1,7 @@
 const express = require('express');
 const twilio = require('twilio');
 const { initializeApp } = require('firebase/app');
-const { getDatabase, ref, push, set, get, child, remove } = require('firebase/database');
+const { getDatabase, ref, push, set, get, child, remove, update } = require('firebase/database');
 const axios = require('axios');
 require('dotenv').config();
 
@@ -15,6 +15,11 @@ const db = getDatabase(app);
 // Initialize Express
 const expressApp = express();
 expressApp.use(express.urlencoded({ extended: true }));
+
+// Helper function to generate verification code
+function generateVerificationCode() {
+  return Math.random().toString(36).substring(2, 8).toUpperCase();
+}
 
 // SIMPLIFIED: Only find exact item name matches (case-insensitive)
 async function findMatchingFoundItems(searchItem) {
@@ -52,6 +57,138 @@ async function findMatchingFoundItems(searchItem) {
   } catch (error) {
     console.error('Error finding matching items:', error);
     return [];
+  }
+}
+
+// NEW: Helper function to show user's reports
+async function showUserReports(from, twiml) {
+  try {
+    const reportsSnapshot = await get(child(ref(db), 'reports'));
+    const reports = reportsSnapshot.val();
+    
+    if (!reports || Object.keys(reports).length === 0) {
+      twiml.message('❌ You have not reported any items yet.\n\nUse the menu to report a lost or found item.');
+      return;
+    }
+    
+    let response = `📋 *Your Reports*\n\n`;
+    let hasReports = false;
+    
+    Object.entries(reports).forEach(([key, report]) => {
+      if (report.reporter === from) {
+        hasReports = true;
+        const date = new Date(report.timestamp).toLocaleString();
+        
+        if (report.type === 'lost') {
+          const status = report.recovered ? '✅ Recovered' : '❌ Not Recovered';
+          response += `🔍 *Lost Item: ${report.item}*\n`;
+          response += `📍 Location: ${report.location}\n`;
+          response += `📅 Reported: ${date}\n`;
+          response += `📊 Status: ${status}\n`;
+          response += `🔐 Code: ${report.verification_code}\n\n`;
+        } else {
+          const status = report.claimed ? '✅ Claimed' : '❌ Not Claimed';
+          response += `🎁 *Found Item: ${report.item}*`;
+          if (report.image_url) {
+            response += ` 📷`;
+          }
+          response += `\n📍 Location: ${report.location}\n`;
+          response += `📅 Reported: ${date}\n`;
+          response += `📊 Status: ${status}\n`;
+          response += `🔐 Code: ${report.verification_code}\n\n`;
+        }
+      }
+    });
+    
+    if (!hasReports) {
+      response = '❌ You have not reported any items yet.\n\nUse the menu to report a lost or found item.';
+    } else {
+      response += `💡 *To mark an item as claimed/recovered:*\n`;
+      response += `Reply with: MARK [CODE] [STATUS]\n`;
+      response += `Example: "MARK ABC123 CLAIMED" or "MARK XYZ789 RECOVERED"`;
+    }
+    
+    twiml.message(response);
+  } catch (error) {
+    console.error('Show user reports error:', error);
+    twiml.message('❌ An error occurred while fetching your reports. Please try again.');
+  }
+}
+
+// NEW: Helper function to handle marking items as claimed/recovered
+async function handleMarkItem(from, msg, twiml) {
+  try {
+    const parts = msg.trim().split(' ');
+    
+    if (parts.length < 3) {
+      twiml.message('⚠️ Format error. Please use: MARK [CODE] [STATUS]\n\nExample: "MARK ABC123 CLAIMED" or "MARK XYZ789 RECOVERED"');
+      return;
+    }
+    
+    const code = parts[1].toUpperCase();
+    const status = parts[2].toLowerCase();
+    
+    if (status !== 'claimed' && status !== 'recovered') {
+      twiml.message('⚠️ Invalid status. Please use "CLAIMED" for found items or "RECOVERED" for lost items.');
+      return;
+    }
+    
+    // Find the report with this verification code
+    const reportsSnapshot = await get(child(ref(db), 'reports'));
+    const reports = reportsSnapshot.val();
+    
+    let targetReport = null;
+    let reportId = null;
+    
+    Object.entries(reports).forEach(([key, report]) => {
+      if (report.verification_code === code && report.reporter === from) {
+        targetReport = report;
+        reportId = key;
+      }
+    });
+    
+    if (!targetReport) {
+      twiml.message('❌ Invalid verification code or you are not authorized to modify this report. Please check your code and try again.');
+      return;
+    }
+    
+    // Check if the status is appropriate for the report type
+    if (targetReport.type === 'lost' && status !== 'recovered') {
+      twiml.message('⚠️ Lost items can only be marked as "RECOVERED".');
+      return;
+    }
+    
+    if (targetReport.type === 'found' && status !== 'claimed') {
+      twiml.message('⚠️ Found items can only be marked as "CLAIMED".');
+      return;
+    }
+    
+    // Check if already marked
+    if ((targetReport.type === 'lost' && targetReport.recovered) || 
+        (targetReport.type === 'found' && targetReport.claimed)) {
+      twiml.message(`⚠️ This item has already been marked as ${status}.`);
+      return;
+    }
+    
+    // Update the report
+    const updateData = {};
+    if (status === 'claimed') {
+      updateData.claimed = true;
+      updateData.claimed_at = new Date().toISOString();
+    } else {
+      updateData.recovered = true;
+      updateData.recovered_at = new Date().toISOString();
+    }
+    
+    await update(ref(db, `reports/${reportId}`), updateData);
+    
+    const successMessage = `✅ Item Successfully Marked as ${status.charAt(0).toUpperCase() + status.slice(1)}!\n\nItem: ${targetReport.item}\nLocation: ${targetReport.location}\n\nThank you for using KWASU Lost & Found Bot!`;
+    
+    twiml.message(successMessage);
+    
+  } catch (error) {
+    console.error('Handle mark item error:', error);
+    twiml.message('❌ An error occurred. Please try again.');
   }
 }
 
@@ -137,7 +274,7 @@ async function handleMediaMessage(req, twiml) {
 // Response handler
 async function handleResponse(from, msg, twiml) {
   try {
-    const userSnapshot = await get(child(ref(db), `users/${from}`));
+    const userSnapshot = await get(child(ref(db, `users/${from}`));
     const user = userSnapshot.val();
     
     if (!user) {
@@ -158,12 +295,17 @@ async function handleResponse(from, msg, twiml) {
       const location = parts[1].trim();
       const description = parts.slice(2).join(',').trim();
       
+      // Generate verification code
+      const verificationCode = generateVerificationCode();
+      
       const reportData = {
         type: 'lost',
         item,
         location,
         description,
         reporter: from,
+        verification_code: verificationCode,
+        recovered: false,
         timestamp: new Date().toISOString()
       };
       
@@ -173,7 +315,8 @@ async function handleResponse(from, msg, twiml) {
       let confirmationMsg = `✅ *Lost Item Reported Successfully!*\n\n`;
       confirmationMsg += `📦 *Item:* ${item}\n`;
       confirmationMsg += `📍 *Location:* ${location}\n`;
-      confirmationMsg += `📝 *Description:* ${description}\n\n`;
+      confirmationMsg += `📝 *Description:* ${description}\n`;
+      confirmationMsg += `🔐 *Verification Code:* ${verificationCode}\n\n`;
       confirmationMsg += `🔍 *We're searching for matching found items...*\n\n`;
       
       // Search for matching found items (case-insensitive)
@@ -188,7 +331,6 @@ async function handleResponse(from, msg, twiml) {
           confirmationMsg += `   📞 Contact: ${foundItem.contact_phone}\n`;
           confirmationMsg += `   📝 ${foundItem.description}\n`;
           if (foundItem.image_url) {
-            // MODIFIED: Added the requested text in front of "Has image"
             confirmationMsg += `   📷 (Go to finditkwasu.ng to see the image result) Has image\n`;
           }
           confirmationMsg += `   ⏰ ${new Date(foundItem.timestamp).toLocaleString()}\n\n`;
@@ -203,6 +345,8 @@ async function handleResponse(from, msg, twiml) {
         confirmationMsg += `• Contact locations where you might have lost it\n\n`;
       }
       
+      confirmationMsg += `💡 *Save your verification code!*\n`;
+      confirmationMsg += `You'll need it to mark this item as recovered later.\n\n`;
       confirmationMsg += `🙏 *Thank you for using KWASU Lost & Found Bot!*`;
       
       // CRITICAL FIX: Make sure the message is sent
@@ -242,6 +386,9 @@ async function handleResponse(from, msg, twiml) {
         const contact_phone = parts[2].trim();
         const description = parts.slice(3).join(',').trim() || 'No description';
         
+        // Generate verification code
+        const verificationCode = generateVerificationCode();
+        
         const reportData = {
           type: 'found',
           item,
@@ -250,6 +397,8 @@ async function handleResponse(from, msg, twiml) {
           description,
           image_url: user.image_url, // Get the image from the user's state
           reporter: from,
+          verification_code: verificationCode,
+          claimed: false,
           timestamp: new Date().toISOString()
         };
         
@@ -261,7 +410,8 @@ async function handleResponse(from, msg, twiml) {
         confirmationMsg += `📍 *Location:* ${location}\n`;
         confirmationMsg += `📞 *Contact:* ${contact_phone}\n`;
         confirmationMsg += `📝 *Description:* ${description}\n`;
-        confirmationMsg += `📷 *Image:* Attached\n\n`;
+        confirmationMsg += `📷 *Image:* Attached\n`;
+        confirmationMsg += `🔐 *Verification Code:* ${verificationCode}\n\n`;
         
         // Updated safety notice with bold formatting
         confirmationMsg += `⚠️ *SAFETY NOTICE:*\n`;
@@ -274,7 +424,9 @@ async function handleResponse(from, msg, twiml) {
         confirmationMsg += `• *Don't release the item*\n`;
         confirmationMsg += `• *Contact KWASU WORKS*\n`;
         confirmationMsg += `• *Share the person's phone number*\n\n`;
-        confirmationMsg += `🛡️ *This keeps our community safe.*\n`;
+        confirmationMsg += `🛡️ *This keeps our community safe.*\n\n`;
+        confirmationMsg += `💡 *Save your verification code!*\n`;
+        confirmationMsg += `You'll need it to mark this item as claimed later.\n\n`;
         confirmationMsg += `🙏 *Thank you for your honesty!*`;
         
         twiml.message(confirmationMsg);
@@ -308,7 +460,6 @@ async function handleResponse(from, msg, twiml) {
             found = true;
             response += `📦 *${report.item}*`;
             if (report.image_url) {
-              // MODIFIED: Added the requested text in front of "Has image"
               response += ` 📷 (Go to finditkwasu.ng to see the image result) Has image`;
             }
             response += `\n📍 Location: ${report.location}\n`;
@@ -336,6 +487,7 @@ async function handleResponse(from, msg, twiml) {
 expressApp.post('/whatsapp', async (req, res) => {
   const twiml = new twilio.twiml.MessagingResponse();
   const msg = req.body.Body ? req.body.Body.toLowerCase().trim() : '';
+  const originalMsg = req.body.Body ? req.body.Body.trim() : ''; // Keep original case for certain operations
   const from = req.body.From;
   const numMedia = parseInt(req.body.NumMedia) || 0;
 
@@ -349,7 +501,7 @@ expressApp.post('/whatsapp', async (req, res) => {
 
     // Main menu
     if (msg === 'menu') {
-      twiml.message(`📋 *Welcome to Kwasu Lost And Found Bot!*\n_v0.2 with Image Support - Designed & Developed by_ Rugged of ICT.\n\nTo proceed with, Select what you are here for from the menu:\n\n1. *Report Lost Item*\n2. *Report Found Item*\n3. *Search for my lost Item*\n\nKindly Reply with 1, 2, or 3.`);
+      twiml.message(`📋 *Welcome to Kwasu Lost And Found Bot!*\n_v0.2 with Image Support - Designed & Developed by_ Rugged of ICT.\n\nTo proceed with, Select what you are here for from the menu:\n\n1. *Report Lost Item*\n2. *Report Found Item*\n3. *Search for my lost Item*\n4. *My Reports*\n5. *Mark Item as Claimed/Recovered*\n\nKindly Reply with 1, 2, 3, 4, or 5.`);
     } 
     // Report lost
     else if (msg === '1') {
@@ -371,14 +523,26 @@ expressApp.post('/whatsapp', async (req, res) => {
       twiml.message('🔎 *Search for my lost Item*\n\nPlease reply with the exact item name to search:\n\nExample: "book", "keys", "bag"\n\n💡 *Tip:* Items with images are marked with 📷');
       await set(ref(db, `users/${from}`), { action: 'search' });
     }
+    // My reports
+    else if (msg === '4') {
+      await showUserReports(from, twiml);
+    }
+    // Mark item
+    else if (msg === '5') {
+      twiml.message('📝 *Mark Item as Claimed/Recovered*\n\nTo mark an item, reply with:\n\nMARK [CODE] [STATUS]\n\nExamples:\n• "MARK ABC123 CLAIMED" (for found items)\n• "MARK XYZ789 RECOVERED" (for lost items)\n\n💡 You can find your verification codes in option 4 (My Reports)');
+    }
     // Cancel option
     else if (msg === 'cancel' || msg === '0') {
       twiml.message('❌ Operation cancelled. Reply "menu" to start again.');
       await remove(ref(db, `users/${from}`));
     }
+    // Handle MARK commands
+    else if (msg.startsWith('mark ')) {
+      await handleMarkItem(from, originalMsg, twiml);
+    }
     // Handle responses
     else {
-      await handleResponse(from, req.body.Body, twiml); // Pass the original message with case preserved
+      await handleResponse(from, originalMsg, twiml); // Pass the original message with case preserved
     }
 
     res.type('text/xml').send(twiml.toString());
@@ -414,7 +578,8 @@ expressApp.get('/debug/items', async (req, res) => {
       type: report.type,
       item: report.item,
       location: report.location,
-      hasImage: !!report.image_url
+      hasImage: !!report.image_url,
+      verificationCode: report.verification_code
     }));
     
     res.json(items);
