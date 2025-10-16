@@ -28,6 +28,7 @@ async function findMatchingFoundItems(searchItem) {
     const matchingItems = [];
     
     Object.entries(reports).forEach(([key, report]) => {
+      // Only include found items in the search results
       if (report.type === 'found') {
         const reportText = `${report.item} ${report.description || ''}`.toLowerCase();
         const matchScore = searchKeywords.reduce((score, keyword) => {
@@ -150,6 +151,7 @@ async function handleResponse(from, msg, twiml) {
         return;
       }
       
+      // Preserve original case for user input
       const item = parts[0].trim();
       const location = parts[1].trim();
       const description = parts.slice(2).join(',').trim();
@@ -172,18 +174,19 @@ async function handleResponse(from, msg, twiml) {
       confirmationMsg += `📝 *Description:* ${description}\n\n`;
       confirmationMsg += `🔍 *We're searching for matching found items...*\n\n`;
       
+      // Search for matching found items (case-insensitive)
       const foundItems = await findMatchingFoundItems(item);
       if (foundItems.length > 0) {
         confirmationMsg += `🎉 *Good news!* We found ${foundItems.length} matching item(s):\n\n`;
-        foundItems.forEach((item, index) => {
-          confirmationMsg += `${index + 1}. *${item.item}*\n`;
-          confirmationMsg += `   📍 Location: ${item.location}\n`;
-          confirmationMsg += `   📞 Contact: ${item.contact_phone}\n`;
-          confirmationMsg += `   📝 ${item.description}\n`;
-          if (item.image_url) {
+        foundItems.forEach((foundItem, index) => {
+          confirmationMsg += `${index + 1}. *${foundItem.item}*\n`;
+          confirmationMsg += `   📍 Location: ${foundItem.location}\n`;
+          confirmationMsg += `   📞 Contact: ${foundItem.contact_phone}\n`;
+          confirmationMsg += `   📝 ${foundItem.description}\n`;
+          if (foundItem.image_url) {
             confirmationMsg += `   📷 Has image\n`;
           }
-          confirmationMsg += `   ⏰ ${new Date(item.timestamp).toLocaleString()}\n\n`;
+          confirmationMsg += `   ⏰ ${new Date(foundItem.timestamp).toLocaleString()}\n\n`;
         });
         
         confirmationMsg += `💡 *Tip:* When contacting, please provide details about your lost item to verify ownership.\n\n`;
@@ -225,6 +228,7 @@ async function handleResponse(from, msg, twiml) {
           return;
         }
         
+        // Preserve original case for user input
         const item = parts[0].trim();
         const location = parts[1].trim();
         const contact_phone = parts[2].trim();
@@ -251,20 +255,19 @@ async function handleResponse(from, msg, twiml) {
         confirmationMsg += `📝 *Description:* ${description}\n`;
         confirmationMsg += `📷 *Image:* Attached\n\n`;
         
-        confirmationMsg += `⚠️ *IMPORTANT SAFETY NOTICE:*\n\n`;
-        confirmationMsg += `When someone contacts you to claim this item, please:\n\n`;
-        confirmationMsg += `🔐 *Ask for verification* - Request specific details about the item such as:\n`;
-        confirmationMsg += `• Exact color\n`;
-        confirmationMsg += `• Shape or size\n`;
-        confirmationMsg += `• Visible marks, scratches, or unique features\n`;
-        confirmationMsg += `• Contents (if applicable)\n\n`;
-        confirmationMsg += `📷 *Use the image* - Ask claimants to describe the image you've uploaded to confirm ownership.\n\n`;
-        confirmationMsg += `🚫 *Report false claimants* - If someone provides incorrect details:\n`;
-        confirmationMsg += `• Do not return the item\n`;
-        confirmationMsg += `• Contact KWASU WORKS immediately\n`;
-        confirmationMsg += `• Provide the claimant's phone number\n\n`;
-        confirmationMsg += `🛡️ *This helps maintain a safe community and prevents fraud.*\n\n`;
-        confirmationMsg += `🙏 *Thank you for your honesty and for helping others!*`;
+        // Updated safety notice with bold formatting
+        confirmationMsg += `⚠️ *SAFETY NOTICE:*\n`;
+        confirmationMsg += `If someone contacts you to claim this item, please:\n\n`;
+        confirmationMsg += `🔐 *Ask for key details:*\n`;
+        confirmationMsg += `• Color or size\n`;
+        confirmationMsg += `• Unique marks or scratches\n`;
+        confirmationMsg += `• Contents (if any)\n\n`;
+        confirmationMsg += `🚫 *If details are wrong:*\n`;
+        confirmationMsg += `• *Don't release the item*\n`;
+        confirmationMsg += `• *Contact KWASU WORKS*\n`;
+        confirmationMsg += `• *Share the person's phone number*\n\n`;
+        confirmationMsg += `🛡️ *This keeps our community safe.*\n`;
+        confirmationMsg += `🙏 *Thank you for your honesty!*`;
         
         twiml.message(confirmationMsg);
         
@@ -272,7 +275,7 @@ async function handleResponse(from, msg, twiml) {
       }
     }
     
-    // Handle search
+    // Handle search - only show found items
     else if (user.action === 'search') {
       const reportsSnapshot = await get(child(ref(db), 'reports'));
       const reports = reportsSnapshot.val();
@@ -286,24 +289,25 @@ async function handleResponse(from, msg, twiml) {
       let found = false;
       
       Object.entries(reports).forEach(([key, report]) => {
-        const searchText = `${report.item} ${report.location} ${report.description || ''}`.toLowerCase();
-        if (searchText.includes(msg.toLowerCase())) {
-          found = true;
-          response += `📦 *${report.item}*`;
-          if (report.image_url) {
-            response += ` 📷`;
-          }
-          response += `\n📍 Location: ${report.location}\n`;
-          response += `📝 ${report.description || 'No description'}`;
-          if (report.type === 'found') {
+        // Only include found items in search results
+        if (report.type === 'found') {
+          const searchText = `${report.item} ${report.location} ${report.description || ''}`.toLowerCase();
+          if (searchText.includes(msg.toLowerCase())) {
+            found = true;
+            response += `📦 *${report.item}*`;
+            if (report.image_url) {
+              response += ` 📷`;
+            }
+            response += `\n📍 Location: ${report.location}\n`;
+            response += `📝 ${report.description || 'No description'}`;
             response += `\n📞 Contact: ${report.contact_phone}`;
+            response += `\n⏰ ${new Date(report.timestamp).toLocaleString()}\n\n`;
           }
-          response += `\n⏰ ${new Date(report.timestamp).toLocaleString()}\n\n`;
         }
       });
       
       if (!found) {
-        response = `❌ No items found matching "${msg}".\n\nTry searching with different keywords or check the spelling.`;
+        response = `❌ No found items matching "${msg}".\n\nTry searching with different keywords or check the spelling.`;
       }
       
       twiml.message(response);
@@ -361,7 +365,7 @@ expressApp.post('/whatsapp', async (req, res) => {
     }
     // Handle responses
     else {
-      await handleResponse(from, msg, twiml);
+      await handleResponse(from, req.body.Body, twiml); // Pass the original message with case preserved
     }
 
     res.type('text/xml').send(twiml.toString());
@@ -414,4 +418,3 @@ expressApp.listen(PORT, () => {
   console.log(`📱 WhatsApp webhook: /whatsapp`);
   console.log(`💚 Health check: /health`);
 });
-
